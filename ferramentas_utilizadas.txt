@@ -1,0 +1,6 @@
+
+41988423365
+
+Ferramentas:
+- Figma para prototipar as telas
+- Github para versionamento do software

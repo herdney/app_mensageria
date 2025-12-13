@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conectar WhatsApp</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a1a 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: white;
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
+
+        .app-layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 70px;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .sidebar:hover {
+            width: 250px;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .sidebar-logo {
+            font-size: 1.5rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #ff004c 0%, #6b6b6b 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .sidebar:hover .sidebar-logo {
+            opacity: 1;
+        }
+
+        .sidebar-menu {
+            padding: 20px 0;
+            flex: 1;
+        }
+
+        .menu-item {
+            display: flex;
+            align-items: center;
+            padding: 15px 20px;
+            color: #ccc;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            position: relative;
+            white-space: nowrap;
+        }
+
+        .menu-item:hover {
+            background: rgba(37, 211, 102, 0.1);
+            color: #ff004c;
+        }
+
+        .menu-item.active {
+            background: rgba(37, 211, 102, 0.2);
+            color: #ff004c;
+            border-right: 3px solid #ff004c;
+        }
+
+        .menu-icon {
+            font-size: 1.2rem;
+            width: 30px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .menu-text {
+            margin-left: 15px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .sidebar:hover .menu-text {
+            opacity: 1;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 10px 0;
+        }
+
+        .logout-item {
+            color: #ff6b6b !important;
+        }
+
+        .logout-item:hover {
+            background: rgba(255, 107, 107, 0.1) !important;
+            color: #ff6b6b !important;
+        }
+
+        /* Main content */
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            overflow-x: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            gap: 60px;
+            align-items: stretch;
+            justify-content: center;
+            max-width: none;
+        }
+
+        .left-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 70vh;
+        }
+
+        .right-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 70vh;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .header p {
+            color: #888;
+            font-size: 1rem;
+            line-height: 1.5;
+        }
+
+        .qr-section {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+        }
+
+        .qr-section h2 {
+            font-size: 1.3rem;
+            margin-bottom: 30px;
+            color: #fff;
+        }
+
+        .input-group {
+            margin-bottom: 25px;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: white;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        .input-group input::placeholder {
+            color: #888;
+        }
+
+        .input-group input:focus {
+            border-color: #ff004c;
+            box-shadow: 0 0 0 2px rgba(37, 211, 102, 0.2);
+        }
+
+        .generate-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #ff004c 0%, #6b6b6b 100%);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 25px;
+        }
+
+        .generate-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(37, 211, 102, 0.3);
+        }
+
+        .generate-btn:disabled {
+            background: #444;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .qr-display {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .qr-display.show {
+            display: flex;
+        }
+
+        .qr-code {
+            width: 250px;
+            height: 250px;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            background: white;
+            padding: 10px;
+        }
+
+        .qr-code img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .refresh-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .refresh-btn:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
+        .timer {
+            color: #ff004c;
+            font-size: 0.9rem;
+            margin-top: 10px;
+        }
+
+        .instructions {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 30px;
+            backdrop-filter: blur(10px);
+        }
+
+        .instructions h3 {
+            color: #ff004c;
+            margin-bottom: 20px;
+            font-size: 1.2rem;
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 8px;
+        }
+
+        .step-number {
+            background: #ff004c;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+
+        .step-content h4 {
+            color: #fff;
+            margin-bottom: 5px;
+            font-size: 1rem;
+        }
+
+        .step-content p {
+            color: #888;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .loading {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: #ff004c;
+            margin: 20px 0;
+        }
+
+        .loading.show {
+            display: flex;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(37, 211, 102, 0.3);
+            border-top: 2px solid #ff004c;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .error {
+            background: rgba(255, 59, 48, 0.1);
+            border: 1px solid rgba(255, 59, 48, 0.3);
+            color: #ff3b30;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            display: none;
+        }
+
+        .error.show {
+            display: block;
+        }
+
+        .connection-status {
+            background: rgba(37, 211, 102, 0.1);
+            border: 1px solid rgba(37, 211, 102, 0.3);
+            color: #ff004c;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            display: none;
+        }
+
+        .connection-status.show {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+                gap: 30px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .qr-section,
+            .instructions {
+                padding: 25px;
+            }
+
+            .sidebar {
+                width: 60px;
+            }
+
+            .sidebar:hover {
+                width: 200px;
+            }
+
+            .main-content {
+                padding: 15px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="app-layout">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">Disparador Campanhas Whats</div>
+            </div>
+            <nav class="sidebar-menu">
+                <a href="#" class="menu-item"
+                    onclick="navigateToPage('https://flow-cmh.nextcomm.tech/webhook/dashboard')">
+                    <span class="menu-icon">📊</span>
+                    <span class="menu-text">Dashboard</span>
+                </a>
+                <a href="#" class="menu-item"
+                    onclick="navigateToPage('https://flow-cmh.nextcomm.tech/webhook/historico-disparos')">
+                    <span class="menu-icon">📋</span>
+                    <span class="menu-text">Histórico de disparos</span>
+                </a>
+                <a href="#" class="menu-item active">
+                    <span class="menu-icon">🔗</span>
+                    <span class="menu-text">Nova Conexão</span>
+                </a>
+                <a href="#" class="menu-item"
+                    onclick="navigateToPage('https://flow-cmh.nextcomm.tech/webhook/conexoes')">
+                    <span class="menu-icon">🔌</span>
+                    <span class="menu-text">Conexões</span>
+                </a>
+                <a href="#" class="menu-item"
+                    onclick="navigateToPage('https://flow-cmh.nextcomm.tech/webhook/disparos-individuais')">
+                    <span class="menu-icon">📱</span>
+                    <span class="menu-text">Disparos individuais</span>
+                </a>
+                <a href="#" class="menu-item"
+                    onclick="navigateToPage('https://flow-cmh.nextcomm.tech/webhook/disparos-grupos')">
+                    <span class="menu-icon">👥</span>
+                    <span class="menu-text">Disparos em grupo</span>
+                </a>
+                <a href="#" class="menu-item" onclick="navigateToPage('https://flow-cmh.nextcomm.tech/webhook/listas')">
+                    <span class="menu-icon">📝</span>
+                    <span class="menu-text">Listas</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <a href="#" class="menu-item logout-item" onclick="logout()">
+                    <span class="menu-icon">🚪</span>
+                    <span class="menu-text">Sair</span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="container">
+                <div class="left-section">
+                    <div class="header">
+                        <h1>Conectar WhatsApp</h1>
+                        <p>Escaneie o QR Code ou use o código de pareamento para conectar sua conta do WhatsApp à
+                            Evolution API.</p>
+                    </div>
+
+                    <div class="qr-section">
+                        <h2>Escaneie o QR Code</h2>
+
+                        <div class="form-section" id="formSection">
+                            <div class="input-group">
+                                <input type="text" id="instanceName" placeholder="Digite o nome da conexão"
+                                    maxlength="50">
+                            </div>
+                            <button class="generate-btn" id="generateBtn">Gerar QR Code</button>
+                        </div>
+
+                        <div class="loading" id="loading">
+                            <div class="spinner"></div>
+                            <span>Gerando QR Code...</span>
+                        </div>
+
+                        <div class="error" id="error">
+                            <span id="errorMessage"></span>
+                        </div>
+
+                        <div class="connection-status" id="connectionStatus">
+                            <span id="statusMessage"></span>
+                        </div>
+
+                        <div class="qr-display" id="qrDisplay">
+                            <div class="qr-code">
+                                <img id="qrImage" src="" alt="QR Code">
+                            </div>
+                            <button class="refresh-btn" id="refreshBtn">🔄 Gerar Novamente</button>
+                            <div class="timer" id="timer">Expira em 29 segundos</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="right-section">
+                    <div class="instructions">
+                        <h3>Como conectar</h3>
+
+                        <div class="step">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <h4>Abra o WhatsApp no seu celular</h4>
+                                <p>Certifique-se de que você está usando a versão mais recente do aplicativo.</p>
+                            </div>
+                        </div>
+
+                        <div class="step">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <h4>Acesse as configurações</h4>
+                                <p>Toque em <strong>Configurações → Dispositivos conectados</strong></p>
+                            </div>
+                        </div>
+
+                        <div class="step">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <h4>Escolha um método de conexão</h4>
+                                <p>📱 Toque em <strong>Conectar um dispositivo</strong> e escaneie o QR Code</p>
+                                <p style="margin-top: 8px;"><strong>OU</strong></p>
+                                <p style="margin-top: 8px;">📱 Toque em <strong>Conectar um dispositivo</strong> e
+                                    digite o código de pareamento</p>
+                            </div>
+                        </div>
+
+                        <div class="step">
+                            <div class="step-number">4</div>
+                            <div class="step-content">
+                                <h4>Aguarde a Conexão</h4>
+                                <p>Após escanear o QR Code ou inserir o código, aguarde a confirmação da conexão.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Elementos do DOM
+        const instanceNameInput = document.getElementById('instanceName');
+        const generateBtn = document.getElementById('generateBtn');
+        const loading = document.getElementById('loading');
+        const error = document.getElementById('error');
+        const errorMessage = document.getElementById('errorMessage');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const statusMessage = document.getElementById('statusMessage');
+        const qrDisplay = document.getElementById('qrDisplay');
+        const qrImage = document.getElementById('qrImage');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const timer = document.getElementById('timer');
+        const formSection = document.getElementById('formSection');
+
+        // Variáveis globais
+        let timerInterval;
+        let connectionCheckInterval;
+        let timeLeft = 29;
+        let currentInstanceName = '';
+        let secureUserId = null;
+
+        // Função para ler cookies
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
+        }
+
+        // Função para obter userId de forma segura via cookies
+        function getSecureUserId() {
+            const userId = getCookie('userId');
+            if (userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+                console.log('✅ UserId (UUID) obtido dos cookies:', userId);
+                return userId;
+            }
+            console.error('❌ UserId (UUID) não encontrado ou formato inválido nos cookies!');
+            return null;
+        }
+
+        // Autenticação obrigatória ao carregar a página
+        function checkAuth() {
+            const userId = getSecureUserId();
+            if (!userId) {
+                window.location.href = 'https://flow-cmh.nextcomm.tech/webhook/login';
+            }
+        }
+
+        // Navegação simplificada (sem parâmetros de autenticação)
+        function navigateToPage(url) {
+            window.location.href = url;
+        }
+
+        // Função para gerar sufixo aleatório
+        function generateRandomSuffix() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+            return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        }
+
+        // Função para mostrar erros
+        function showError(message) {
+            console.log('Mostrando erro:', message);
+            errorMessage.textContent = message;
+            error.classList.add('show');
+            connectionStatus.classList.remove('show');
+            setTimeout(() => {
+                error.classList.remove('show');
+            }, 5000);
+        }
+
+        // Função para mostrar status
+        function showStatus(message) {
+            console.log('Mostrando status:', message);
+            statusMessage.textContent = message;
+            connectionStatus.classList.add('show');
+            error.classList.remove('show');
+        }
+
+        // Função para iniciar timer
+        function startTimer() {
+            timeLeft = 29;
+            timerInterval = setInterval(() => {
+                timer.textContent = `Expira em ${timeLeft} segundos`;
+                timeLeft--;
+
+                if (timeLeft < 0) {
+                    clearInterval(timerInterval);
+                    timer.textContent = 'QR Code expirado';
+                    timer.style.color = '#ff3b30';
+                }
+            }, 1000);
+        }
+
+        // Função para resetar timer
+        function resetTimer() {
+            if (timerInterval) {
+                clearInterval(timerInterval);
+            }
+            if (connectionCheckInterval) {
+                clearInterval(connectionCheckInterval);
+            }
+            timer.style.color = '#ff004c';
+        }
+
+        // Função para verificar estado da conexão
+        async function checkConnectionState() {
+            try {
+                console.log('Verificando estado da conexão para:', currentInstanceName);
+                const response = await fetch(`https://evo-cmh2.nextcomm.tech/instance/connectionState/${currentInstanceName}`, {
+                    method: 'GET',
+                    headers: {
+                        'apikey': '03Iobh%2&XC4'
+                    }
+                });
+
+                const data = await response.json();
+                console.log('Estado da conexão:', data);
+
+                if (data.instance && data.instance.state === 'open') {
+                    // Conexão estabelecida com sucesso
+                    clearInterval(connectionCheckInterval);
+                    resetTimer();
+
+                    // Mostrar mensagem de sucesso
+                    timer.textContent = '✅ Conectado com sucesso!';
+                    timer.style.color = '#34c759';
+                    showStatus('✅ WhatsApp conectado com sucesso! Salvando dados...');
+
+                    // Salvar foto do perfil antes de redirecionar
+                    try {
+                        console.log('Salvando foto do perfil...');
+                        const userId = getSecureUserId();
+
+                        const savePhotoResponse = await fetch('https://flow-cmh.nextcomm.tech/webhook/salvarfoto', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                userId: userId,
+                                instanceName: currentInstanceName
+                            })
+                        });
+
+                        if (!savePhotoResponse.ok) {
+                            console.error('Erro ao salvar foto:', await savePhotoResponse.text());
+                            // Continua mesmo se falhar ao salvar a foto
+                        } else {
+                            console.log('Foto salva com sucesso');
+                        }
+
+                    } catch (photoError) {
+                        console.error('Erro na requisição para salvar foto:', photoError);
+                        // Continua mesmo se falhar ao salvar a foto
+                    }
+
+                    // Redirecionar após salvar (ou tentar salvar) a foto
+                    showStatus('✅ WhatsApp conectado com sucesso! Redirecionando...');
+                    setTimeout(() => {
+                        // Redirecionar para página de conexões
+                        window.location.href = 'https://flow-cmh.nextcomm.tech/webhook/conexoes';
+                    }, 1500);
+                }
+            } catch (err) {
+                console.error('Erro ao verificar estado da conexão:', err);
+            }
+        }
+
+        // Função para iniciar verificação de conexão
+        function startConnectionCheck() {
+            console.log('Iniciando verificação de conexão');
+            connectionCheckInterval = setInterval(checkConnectionState, 5000);
+        }
+
+        // Função principal para gerar QR Code
+        async function generateQRCode() {
+            console.log('Iniciando geração de QR Code');
+
+            const instanceBaseName = instanceNameInput.value.trim();
+            const userId = getSecureUserId();
+
+            if (!instanceBaseName) {
+                showError('Por favor, digite o nome da conexão');
+                return;
+            }
+
+            if (!userId) {
+                showError('Sessão inválida. Recarregue a página.');
+                return;
+            }
+
+            console.log('Processando requisição para instância:', instanceBaseName);
+
+            // Reset states
+            error.classList.remove('show');
+            connectionStatus.classList.remove('show');
+            qrDisplay.classList.remove('show');
+            resetTimer();
+
+            // Show loading
+            loading.classList.add('show');
+            generateBtn.disabled = true;
+
+            try {
+                console.log('Fazendo requisição para criar conexão');
+                const response = await fetch('https://flow-cmh.nextcomm.tech/webhook/criarconexaoback', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        userId: userId,
+                        instanceName: instanceBaseName
+                    })
+                });
+
+                console.log('Status da resposta:', response.status);
+                const data = await response.json();
+                console.log('Dados recebidos:', data);
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Erro ao gerar QR Code');
+                }
+
+                if (data.qrcode && data.instanceName) {
+                    console.log('QR Code recebido, exibindo');
+
+                    // Armazenar o nome da instância retornado pela API
+                    currentInstanceName = data.instanceName;
+
+                    // Show QR Code
+                    qrImage.src = data.qrcode;
+
+                    qrDisplay.classList.add('show');
+                    formSection.style.display = 'none';
+                    startTimer();
+                    startConnectionCheck();
+                    showStatus('QR Code gerado! Escaneie com seu WhatsApp.');
+                } else {
+                    throw new Error('QR Code ou instanceName não foi retornado pela API');
+                }
+
+            } catch (err) {
+                console.error('Erro:', err);
+                showError(err.message || 'Erro ao conectar com a API');
+            } finally {
+                loading.classList.remove('show');
+                generateBtn.disabled = false;
+            }
+        }
+
+        // Função para refresh do QR Code
+        async function refreshQRCode() {
+            console.log('Fazendo refresh do QR Code');
+
+            if (!currentInstanceName) {
+                showError('Nome da instância não encontrado');
+                return;
+            }
+
+            // Reset states
+            error.classList.remove('show');
+            connectionStatus.classList.remove('show');
+            resetTimer();
+
+            // Show loading
+            loading.classList.add('show');
+            refreshBtn.disabled = true;
+
+            try {
+                console.log('Fazendo requisição para reconectar');
+                const response = await fetch(`https://evo-cmh2.nextcomm.tech/instance/connect/${currentInstanceName}`, {
+                    method: 'GET',
+                    headers: {
+                        'apikey': '03Iobh%2&XC4'
+                    }
+                });
+
+                const data = await response.json();
+                console.log('Dados do refresh:', data);
+
+                if (!response.ok) {
+                    throw new Error(data.message || 'Erro ao gerar novo QR Code');
+                }
+
+                if (data.qrcode && data.qrcode.base64) {
+                    // Update QR Code
+                    qrImage.src = data.qrcode.base64;
+                    startTimer();
+                    startConnectionCheck();
+                    showStatus('Novo QR Code gerado! Escaneie com seu WhatsApp.');
+                } else {
+                    throw new Error('QR Code não foi retornado pela API');
+                }
+
+            } catch (err) {
+                console.error('Erro:', err);
+                showError(err.message || 'Erro ao gerar novo QR Code');
+            } finally {
+                loading.classList.remove('show');
+                refreshBtn.disabled = false;
+            }
+        }
+
+        // Event listeners
+        generateBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            console.log('Botão clicado');
+            generateQRCode();
+        });
+
+        refreshBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            console.log('Botão refresh clicado');
+            refreshQRCode();
+        });
+
+        instanceNameInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                generateQRCode();
+            }
+        });
+
+        // Verificar autenticação ao carregar a página
+        checkAuth();
+
+        // Auto focus no input
+        instanceNameInput.focus();
+
+        console.log('Script carregado com sucesso');
+
+        // Função de logout
+        function logout() {
+            console.log('🚪 Iniciando logout...');
+
+            // Limpar todos os cookies
+            document.cookie = 'userId=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            document.cookie = 'idLista=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            document.cookie = 'idConexao=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+            document.cookie = 'idDisparo=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+
+            // Limpar sessionStorage
+            sessionStorage.clear();
+
+            console.log('🧹 Cookies e sessionStorage limpos');
+            console.log('🔄 Redirecionando para login...');
+
+            // Redirecionar para página de login
+            //window.location.href = 'https://flow-cmh.nextcomm.tech/webhook/login';
+        }
+    </script>
+</body>
+
+</html>
