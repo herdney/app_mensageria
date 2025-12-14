@@ -99,8 +99,26 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
             };
 
             setMessages(prev => {
-              // Avoid duplicates
+              // 1. Check strict duplicate (ID match)
               if (prev.some(m => m.id === newMessage.id)) return prev;
+
+              // 2. Check optimistic duplicate (Text + Sender match for temp IDs)
+              // Only matching the last few messages to be safe/performant, but finding anywhere is fine for this scale
+              if (newMessage.sender === "user") {
+                const optimisticMatchIndex = prev.findIndex(m =>
+                  m.sender === "user" &&
+                  m.text === newMessage.text &&
+                  m.id.startsWith("temp-")
+                );
+
+                if (optimisticMatchIndex !== -1) {
+                  // Replace optimistic with real
+                  const newHistory = [...prev];
+                  newHistory[optimisticMatchIndex] = newMessage;
+                  return newHistory;
+                }
+              }
+
               return [...prev, newMessage];
             });
           }
@@ -176,7 +194,7 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
     setIsSending(true);
     const textToSend = inputMessage;
     // Optimistic UI Update
-    const tempId = Math.random().toString();
+    const tempId = "temp-" + Math.random().toString();
     const optimisticMsg: Message = {
       id: tempId,
       text: textToSend,

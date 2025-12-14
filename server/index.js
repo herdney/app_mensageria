@@ -5,6 +5,11 @@ const { Server } = require('socket.io');
 const db = require('./db');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
+const OpenAI = require('openai');
+
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+});
 
 const app = express();
 const server = http.createServer(app);
@@ -18,7 +23,7 @@ const io = new Server(server, {
 const port = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json()); // Evolution API sends JSON webhooks by default
+app.use(express.json({ limit: '50mb' })); // Evolution API sends JSON webhooks by default
 
 // Access global IO instance if needed
 app.set('io', io);
@@ -79,6 +84,12 @@ app.post('/webhook', async (req, res) => {
 
                     const id = msg.key.id;
                     const remoteJid = msg.key.remoteJid;
+
+                    // User Request: Ignore group messages
+                    if (remoteJid && remoteJid.includes('@g.us')) {
+                        console.log(`Ignoring group message: ${remoteJid}`);
+                        continue;
+                    }
                     const fromMe = msg.key.fromMe || false;
                     const instanceName = event.instance || 'default';
                     // User Request: push_name only if from_me is false
@@ -131,6 +142,9 @@ app.post('/webhook', async (req, res) => {
 
                             // Trigger enrichment (profile pic, business status)
                             enrichContactData(instanceName, remoteJid);
+
+                            // Trigger Agent Auto-Reply
+                            handleAgentAutoReply(instanceName, remoteJid, content, pushName);
                         } else {
                             // Update last message for sent items
                             await db.query(`
@@ -369,6 +383,151 @@ async function enrichContactData(instanceName, remoteJid) {
 
     } catch (err) {
         console.error(`Enrichment failed for ${remoteJid}:`, err.message);
+    }
+}
+
+// --- AGENTS API ---
+
+// GET /agents
+app.get('/agents', async (req, res) => {
+    try {
+        const { rows } = await db.query('SELECT * FROM agents ORDER BY created_at DESC');
+        res.json(rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to fetch agents' });
+    }
+});
+
+// POST /agents
+app.post('/agents', async (req, res) => {
+    const { id, name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key } = req.body;
+    try {
+        const { rows } = await db.query(`
+            INSERT INTO agents (id, name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            RETURNING *
+        `, [id || Date.now().toString(), name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key]);
+        res.status(201).json(rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to create agent' });
+    }
+});
+
+// PUT /agents/:id
+app.put('/agents/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key } = req.body;
+    try {
+        const { rows } = await db.query(`
+            UPDATE agents SET
+                name = COALESCE($1, name),
+                description = COALESCE($2, description),
+                prompt = COALESCE($3, prompt),
+                model = COALESCE($4, model),
+                temperature = COALESCE($5, temperature),
+                max_context = COALESCE($6, max_context),
+                is_active = COALESCE($7, is_active),
+                auto_reply = COALESCE($8, auto_reply),
+                working_hours = COALESCE($9, working_hours),
+                keywords = COALESCE($10, keywords),
+                languages = COALESCE($11, languages),
+                api_key = COALESCE($12, api_key)
+            WHERE id = $13
+            RETURNING *
+        `, [name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key, id]);
+        res.json(rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to update agent' });
+    }
+});
+
+// DELETE /agents/:id
+app.delete('/agents/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        await db.query('DELETE FROM agents WHERE id = $1', [id]);
+        res.status(204).send();
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Failed to delete agent' });
+    }
+});
+
+// --- AI AUTO REPLY LOGIC ---
+async function handleAgentAutoReply(instanceName, remoteJid, content, senderName) {
+    try {
+        // 1. Find active agents (Simplified: matches any agent active)
+        const { rows: agents } = await db.query('SELECT * FROM agents WHERE is_active = true AND auto_reply = true');
+        if (agents.length === 0) return;
+
+        const agent = agents[0]; // Priority: First one
+
+        // 2. Filter: Keywords
+        if (agent.keywords && agent.keywords.length > 0) {
+            const hasKeyword = agent.keywords.some(k => content.toLowerCase().includes(k.toLowerCase()));
+            if (!hasKeyword) return;
+        }
+
+        console.log(`🤖 Agent ${agent.name} triggered for ${remoteJid}`);
+
+        // 3. Context Builder
+        const { rows: history } = await db.query(`
+            SELECT from_me, content FROM messages 
+            WHERE remote_jid = $1 AND instance_name = $2 
+            ORDER BY created_at DESC LIMIT $3
+        `, [remoteJid, instanceName, agent.max_context]);
+
+        // Reverse to chronological order
+        const conversationHistory = history.reverse().map(m => ({
+            role: m.from_me ? 'assistant' : 'user',
+            content: m.content || ""
+        }));
+
+        // 4. Generate Response
+        let client = openai;
+        if (agent.api_key) {
+            client = new OpenAI({ apiKey: agent.api_key });
+        }
+
+        const completion = await client.chat.completions.create({
+            model: agent.model,
+            messages: [
+                { role: 'system', content: agent.prompt.replace('{name}', senderName || 'Cliente').replace('{now}', new Date().toLocaleString()) },
+                ...conversationHistory
+            ],
+            temperature: parseFloat(agent.temperature) || 0.7
+        });
+
+        const replyText = completion.choices[0].message.content;
+        if (!replyText) return;
+
+        // 5. Send Response via Evolution API
+        const { rows: hosts } = await db.query('SELECT base_url, api_key FROM evolution_hosts WHERE name = $1', [instanceName]);
+        if (hosts.length === 0) {
+            console.error("Host not found for auto-reply:", instanceName);
+            return;
+        }
+        const { base_url, api_key } = hosts[0];
+
+        // Delay slightly to feel natural
+        setTimeout(async () => {
+            await fetch(`${base_url}/message/sendText/${instanceName}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'apikey': api_key },
+                body: JSON.stringify({
+                    number: remoteJid.split('@')[0],
+                    text: replyText,
+                    // Optional: delay typing
+                })
+            });
+            console.log(`🤖 Agent replied to ${remoteJid}`);
+        }, 1500);
+
+    } catch (e) {
+        console.error("Agent Auto-Reply Error:", e);
     }
 }
 

@@ -112,6 +112,31 @@ const initDb = async () => {
             );
         `);
 
+        // 4. Agents Table
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS agents (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                prompt TEXT NOT NULL,
+                model TEXT DEFAULT 'gpt-3.5-turbo',
+                temperature NUMERIC DEFAULT 0.7,
+                max_context INTEGER DEFAULT 10,
+                is_active BOOLEAN DEFAULT TRUE,
+                auto_reply BOOLEAN DEFAULT FALSE,
+                working_hours JSONB,
+                keywords TEXT[],
+                languages TEXT[],
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // Add api_key to agents if it doesn't exist
+        await client.query(`
+            ALTER TABLE agents 
+            ADD COLUMN IF NOT EXISTS api_key TEXT
+        `);
+
         // Backfill contacts from messages if empty
         const contactsCheck = await client.query('SELECT 1 FROM contacts LIMIT 1');
         if (contactsCheck.rowCount === 0) {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -8,7 +8,8 @@ import { Switch } from "./ui/switch";
 import { Slider } from "./ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Badge } from "./ui/badge";
-import { Bot, Save, Plus, X } from "lucide-react";
+import { Bot, Save, Plus, X, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 type Agent = {
   id: string;
@@ -26,6 +27,7 @@ type Agent = {
     end: string;
   };
   languages: string[];
+  api_key?: string;
 };
 
 export function AgentView() {
@@ -45,51 +47,142 @@ export function AgentView() {
       end: "18:00",
     },
     languages: ["pt-BR"],
+    api_key: "",
   });
   const [isEditing, setIsEditing] = useState(false);
   const [keywordInput, setKeywordInput] = useState("");
 
-  const handleSaveAgent = () => {
+  const fetchAgents = async () => {
+    try {
+      const res = await fetch("http://localhost:3001/agents");
+      if (res.ok) {
+        const data = await res.json();
+        // Map snake_case from DB to camelCase for Frontend
+        const mappedAgents = data.map((dbAgent: any) => ({
+          ...dbAgent,
+          isActive: dbAgent.is_active,
+          autoReply: dbAgent.auto_reply,
+          maxContext: dbAgent.max_context,
+          temperature: parseFloat(dbAgent.temperature), // Ensure number
+          workingHours: dbAgent.working_hours || { start: "09:00", end: "18:00" } // Fallback if null
+        }));
+        setAgents(mappedAgents);
+      }
+    } catch (error) {
+      console.error("Failed to fetch agents:", error);
+      toast.error("Erro ao carregar agentes");
+    }
+  };
+
+  useEffect(() => {
+    fetchAgents();
+  }, []);
+
+  const handleSaveAgent = async () => {
     if (!currentAgent.name || !currentAgent.prompt) {
-      alert("Por favor, preencha o nome e o prompt do agente");
+      toast.error("Por favor, preencha o nome e o prompt do agente");
       return;
     }
 
-    const newAgent: Agent = {
-      id: Date.now().toString(),
+    const payload = {
+      id: currentAgent.id || Date.now().toString(),
       name: currentAgent.name,
       description: currentAgent.description || "",
       prompt: currentAgent.prompt,
-      isActive: currentAgent.isActive ?? true,
-      autoReply: currentAgent.autoReply ?? false,
-      model: currentAgent.model || "gpt-3.5-turbo",
-      temperature: currentAgent.temperature ?? 0.7,
-      maxContext: currentAgent.maxContext ?? 10,
+      model: currentAgent.model,
+      temperature: currentAgent.temperature,
+      is_active: currentAgent.isActive,
+      auto_reply: currentAgent.autoReply,
+      max_context: currentAgent.maxContext,
+      working_hours: currentAgent.workingHours || { start: "09:00", end: "18:00" },
       keywords: currentAgent.keywords || [],
-      workingHours: currentAgent.workingHours || { start: "09:00", end: "18:00" },
       languages: currentAgent.languages || ["pt-BR"],
+      api_key: currentAgent.api_key,
     };
 
-    setAgents([...agents, newAgent]);
-    
-    // Reset form
-    setCurrentAgent({
-      name: "",
-      description: "",
-      prompt: "",
-      isActive: true,
-      autoReply: false,
-      model: "gpt-3.5-turbo",
-      temperature: 0.7,
-      maxContext: 10,
-      keywords: [],
-      workingHours: {
-        start: "09:00",
-        end: "18:00",
-      },
-      languages: ["pt-BR"],
-    });
-    setIsEditing(false);
+    try {
+      const method = currentAgent.id ? "PUT" : "POST";
+      const url = currentAgent.id
+        ? `http://localhost:3001/agents/${currentAgent.id}`
+        : "http://localhost:3001/agents";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        toast.success("Agente salvo com sucesso!");
+        fetchAgents();
+        handleNewAgent(); // Reset form
+        setIsEditing(false);
+      } else {
+        throw new Error("Failed to save");
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro ao salvar agente");
+    }
+  };
+
+  const handleDeleteAgent = async (id: string) => {
+    if (!confirm("Tem certeza que deseja excluir este agente?")) return;
+    try {
+      const res = await fetch(`http://localhost:3001/agents/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast.success("Agente removido");
+        fetchAgents();
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro ao remover agente");
+    }
+  };
+
+
+
+  const handleToggleStatus = async (id: string, newStatus: boolean) => {
+    try {
+      const agentToUpdate = agents.find(a => a.id === id);
+      if (!agentToUpdate) return;
+
+      const payload = {
+        ...agentToUpdate,
+        id: agentToUpdate.id,
+        name: agentToUpdate.name,
+        description: agentToUpdate.description,
+        prompt: agentToUpdate.prompt,
+        model: agentToUpdate.model,
+        temperature: agentToUpdate.temperature,
+        is_active: newStatus, // Update status
+        auto_reply: agentToUpdate.autoReply,
+        max_context: agentToUpdate.maxContext,
+        working_hours: agentToUpdate.workingHours,
+        keywords: agentToUpdate.keywords,
+        languages: agentToUpdate.languages,
+        api_key: agentToUpdate.api_key
+      };
+
+      const res = await fetch(`http://localhost:3001/agents/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        toast.success(`Agente ${newStatus ? 'ativado' : 'desativado'}`);
+        fetchAgents();
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Erro ao atualizar status");
+    }
+  };
+
+  const handleEditAgent = (agent: Agent) => {
+    setCurrentAgent(agent);
+    setIsEditing(true);
   };
 
   const handleNewAgent = () => {
@@ -109,6 +202,7 @@ export function AgentView() {
         end: "18:00",
       },
       languages: ["pt-BR"],
+      api_key: "",
     });
   };
 
@@ -188,11 +282,22 @@ export function AgentView() {
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs px-2 py-1 rounded-full ${
-                        agent.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                      }`}>
-                        {agent.isActive ? 'Ativo' : 'Inativo'}
-                      </span>
+                      <div className="flex items-center gap-2 mr-2">
+                        <Label htmlFor={`switch-${agent.id}`} className="text-xs cursor-pointer">
+                          {agent.isActive ? 'Ativo' : 'Inativo'}
+                        </Label>
+                        <Switch
+                          id={`switch-${agent.id}`}
+                          checked={agent.isActive}
+                          onCheckedChange={(checked) => handleToggleStatus(agent.id, checked)}
+                        />
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={() => handleEditAgent(agent)}>
+                        <Bot className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteAgent(agent.id)} className="text-destructive hover:text-destructive">
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -272,7 +377,7 @@ export function AgentView() {
                 {/* Informações Básicas */}
                 <div className="space-y-4">
                   <h4 className="font-medium">Informações Básicas</h4>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="agentName">Nome do Agente *</Label>
                     <Input
@@ -313,7 +418,7 @@ export function AgentView() {
                 {/* Configurações do Modelo */}
                 <div className="space-y-4">
                   <h4 className="font-medium">Configurações do Modelo</h4>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="model">Modelo de IA</Label>
                     <Select
@@ -332,6 +437,20 @@ export function AgentView() {
                         <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="apiKey">OpenAI API Key (Opcional)</Label>
+                    <Input
+                      id="apiKey"
+                      type="password"
+                      placeholder="sk-..."
+                      value={currentAgent.api_key || ""}
+                      onChange={(e) => setCurrentAgent({ ...currentAgent, api_key: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Deixe em branco para usar a chave global do sistema
+                    </p>
                   </div>
 
                   <div className="space-y-2">
@@ -379,7 +498,7 @@ export function AgentView() {
                 {/* Filtros e Palavras-chave */}
                 <div className="space-y-4">
                   <h4 className="font-medium">Filtros e Palavras-chave</h4>
-                  
+
                   <div className="space-y-2">
                     <Label htmlFor="keywords">Palavras-chave de Ativação</Label>
                     <div className="flex gap-2">
@@ -425,7 +544,7 @@ export function AgentView() {
                 {/* Horário de Funcionamento */}
                 <div className="space-y-4">
                   <h4 className="font-medium">Horário de Funcionamento</h4>
-                  
+
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="startTime">Início</Label>
@@ -472,7 +591,7 @@ export function AgentView() {
                 {/* Idiomas */}
                 <div className="space-y-4">
                   <h4 className="font-medium">Idiomas Suportados</h4>
-                  
+
                   <div className="flex flex-wrap gap-2">
                     {languageOptions.map((lang) => (
                       <Badge
@@ -495,7 +614,7 @@ export function AgentView() {
                 {/* Configurações Gerais */}
                 <div className="space-y-4">
                   <h4 className="font-medium">Configurações Gerais</h4>
-                  
+
                   <div className="flex items-center justify-between">
                     <div className="space-y-0.5">
                       <Label htmlFor="isActive">Agente Ativo</Label>
@@ -535,8 +654,8 @@ export function AgentView() {
                   <Save className="w-4 h-4 mr-2" />
                   Salvar Agente
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => setIsEditing(false)}
                   className="flex-1"
                 >

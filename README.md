@@ -1,40 +1,104 @@
+# App Mensageria 🚀
 
-# Aplicação Web de Mensageria
+Uma plataforma centralizada para gestão de múltiplas instâncias do WhatsApp com capacidades avançadas de Agentes de IA. Construído sobre a [Evolution API v2](https://github.com/EvolutionAPI/evolution-api).
 
-This is a code bundle for Aplicação Web de Mensageria. The original project is available at https://www.figma.com/design/oQWY9jenXj8hKMxodVx75A/Aplica%C3%A7%C3%A3o-Web-de-Mensageria.
+![Status](https://img.shields.io/badge/Status-Em_Desenvolvimento-yellow)
+![Stack](https://img.shields.io/badge/Stack-React_Start_NodeJS_Postgres-blue)
 
-## Running the code
+## 📋 Visão Geral
 
-Run `npm i` to install the dependencies.
+Este projeto permite conectar e gerenciar múltiplas contas do WhatsApp em uma única interface. Além do chat em tempo real, ele oferece uma funcionalidade poderosa de **Agentes de IA**, permitindo criar assistentes virtuais personalizados (usando OpenAI) que respondem automaticamente aos clientes com base em prompts e contextos definidos.
 
-Run `npm run dev` to start the development server.
+### ✨ Principais Funcionalidades
 
-## Funcionalidades Implementadas
+*   **Multiatendimento & Multi-instância:** Gerencie várias conexões do WhatsApp simultaneamente.
+*   **Chat em Tempo Real:** Interface reativa via Socket.io para envio e recebimento instantâneo de mensagens.
+*   **🤖 Agentes de IA:**
+    *   Crie agentes com personalidades e funções específicas.
+    *   Defina horários de funcionamento.
+    *   Configure palavras-chave de ativação.
+    *   Contexto de conversa inteligente (memória das últimas mensagens).
+*   **Gestão de Contatos:** Sincronização local de contatos e histórico de mensagens.
+*   **Interface Moderna:** Construída com React, TailwindCSS e Shadcn/ui para uma experiência premium.
 
-### 1. Sistema de Chat & Mensagens
-*   **Envio de Mensagens:** Envio de mensagens de texto simples para números individuais.
-*   **Recebimento em Tempo Real:** As mensagens recebidas aparecem instantaneamente na interface (via WebSocket/Socket.io) sem precisar recarregar a página.
-*   **Histórico Persistente:** Todas as mensagens são salvas no banco de dados (PostgreSQL) e carregadas ao abrir a conversa.
-*   **Interface Otimista:** A mensagem enviada aparece na hora para o usuário para maior fluidez.
+## 🛠️ Tecnologias Utilizadas
 
-### 2. Gestão de Contatos (Sidebar)
-*   **Lista Dinâmica:** Ordenação automática (contatos com mensagens mais recentes ficam no topo).
-*   **Novo Chat:** Capacidade de iniciar conversa com um número que não está na agenda.
-*   **Busca:** Campo de pesquisa para filtrar contatos pelo nome ou telefone.
-*   **Enriquecimento de Dados:** Busca automática de Nome e Foto de Perfil na API do WhatsApp.
-*   **Atualização Manual:** Botão de "Refresh" para sincronizar a lista com o banco de dados.
+### Frontend
+*   **React (Vite):** Framework principal.
+*   **TypeScript:** Segurança de tipos.
+*   **TailwindCSS:** Estilização.
+*   **Shadcn/ui:** Componentes de UI reutilizáveis.
+*   **Socket.io Client:** Comunicação em tempo real.
 
-### 3. Tratamento de Erros e Validações
-*   **Detecção de Números Inválidos:** Aviso claro ("Este número não possui uma conta") para números inexistentes.
-*   **Auto-correção da Lista:** Remoção automática de contatos inválidos da lista lateral.
-*   **Feedback Visual:** Notificações (Toasts) de sucesso, erro e conexão.
+### Backend
+*   **Node.js & Express:** Servidor API REST.
+*   **PostgreSQL:** Banco de dados relacional para persistência (mensagens, contatos, agentes).
+*   **Socket.io:** Websocket server.
+*   **OpenAI API:** Inteligência dos agentes.
 
-### 4. Gestão de Instâncias (Conexão)
-*   **Conexão QR Code:** Geração de QR Code via Evolution API.
-*   **Múltiplas Instâncias:** Suporte para salvar e alternar entre diferentes instâncias.
-*   **Configuração Automática:** Webhook configurado automaticamente ao conectar.
+## ⚙️ Pré-requisitos
 
-### 5. Backend (Server)
-*   **Webhook Inteligente:** Processamento normalize de eventos `UPSERT` e `SEND.MESSAGE`.
-*   **Persistência SQL:** Banco de dados PostgreSQL (tabelas `messages`, `contacts`, `evolution_hosts`).
-*   **Endpoint de Limpeza:** Rota `/database/clear` para resetar o banco.
+*   **Node.js** (v18 ou superior)
+*   **PostgreSQL** (Banco de dados rodando localmente ou remoto)
+*   **Evolution API** (Instância rodando e configurada)
+*   **Chave da OpenAI** (Para uso dos Agentes)
+
+## 🚀 Instalação e Configuração
+
+### 1. Configurar o Backend
+
+Navegue até a pasta do servidor:
+```bash
+cd server
+```
+
+Instale as dependências:
+```bash
+npm install
+```
+
+Crie um arquivo `.env` na pasta `server` com as seguintes variáveis:
+```env
+# Banco de Dados
+DB_USER=postgres
+DB_PASSWORD=sua_senha
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=mensageria
+
+# Servidor
+PORT=3001
+
+# Integração IA (Chave Global)
+OPENAI_API_KEY=sk-...
+```
+
+Inicie o servidor (ele criará as tabelas do banco automaticamente na primeira execução):
+```bash
+npm start
+# ou para desenvolvimento
+npm run dev
+```
+
+### 2. Configurar o Frontend
+
+Na raiz do projeto:
+```bash
+npm install
+```
+
+Inicie a aplicação:
+```bash
+npm run dev
+```
+Acesse `http://localhost:5173` no seu navegador.
+
+## 📖 Como Usar
+
+1.  **Conexão:** Vá até a aba de **Conexão**, insira a URL e API Key da sua Evolution API e crie uma nova instância (QR Code).
+2.  **Agentes:** Na aba **Agentes**, configure seu assistente virtual. Ative a "Resposta Automática" para que ele comece a interagir.
+3.  **Chat:** Use a tela inicial para ver seus contatos e conversar em tempo real.
+
+## 🤝 Contribuição
+
+Projeto desenvolvido para fins de estudo e implementação de automação com IA. Sinta-se à vontade para abrir issues ou PRs.
