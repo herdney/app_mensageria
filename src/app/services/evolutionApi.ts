@@ -19,6 +19,8 @@ export interface ConnectInstanceResponse {
         instanceName: string;
         instanceId: string;
         status: string;
+        ownerJid?: string;
+        profilePicUrl?: string;
     };
     base64?: string;
     code?: string; // Raw pairing code
@@ -52,19 +54,31 @@ export class EvolutionApiService {
     async createInstance(
         instanceName: string,
         token: string = "",
-        description: string = ""
+        description: string = "",
+        webhookUrl: string = ""
     ): Promise<CreateInstanceResponse> {
         try {
+            const body: any = {
+                instanceName,
+                token,
+                description,
+                qrcode: true, // Auto-generate QR on create
+                integration: "WHATSAPP-BAILEYS",
+            };
+
+            if (webhookUrl) {
+                body.webhook = {
+                    url: webhookUrl,
+                    byEvents: false,
+                    base64: true,
+                    events: ["MESSAGES_UPSERT"]
+                };
+            }
+
             const response = await fetch(`${this.baseUrl}/instance/create`, {
                 method: "POST",
                 headers: this.getHeaders(),
-                body: JSON.stringify({
-                    instanceName,
-                    token,
-                    description,
-                    qrcode: true, // Auto-generate QR on create
-                    integration: "WHATSAPP-BAILEYS",
-                }),
+                body: JSON.stringify(body),
             });
 
             if (!response.ok) {
@@ -177,6 +191,144 @@ export class EvolutionApiService {
         } catch (error) {
             console.error("Error deleting instance:", error);
             throw error;
+        }
+    }
+    async setWebhook(instanceName: string, webhookUrl: string, enabled: boolean = true): Promise<any> {
+        try {
+            const response = await fetch(`${this.baseUrl}/webhook/set/${instanceName}`, {
+                method: "POST",
+                headers: this.getHeaders(),
+                body: JSON.stringify({
+                    enabled,
+                    url: webhookUrl,
+                    webhookByEvents: true,
+                    webhookBase64: true,
+                    events: [
+                        "APPLICATION_STARTUP",
+                        "MESSAGES_UPSERT",
+                        "MESSAGES_UPDATE",
+                        "MESSAGES_DELETE",
+                        "SEND_MESSAGE_UPDATE",
+                        "CONTACTS_UPSERT",
+                        "CONTACTS_UPDATE",
+                        "PRESENCE_UPDATE",
+                        "CHATS_SET",
+                        "CHATS_UPSERT",
+                        "CHATS_UPDATE",
+                        "CHATS_DELETE",
+                        "GROUPS_UPSERT",
+                        "GROUPS_UPDATE",
+                        "GROUP_PARTICIPANTS_UPDATE",
+                        "CONNECTION_UPDATE"
+                    ]
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || "Failed to set webhook");
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error("Error setting webhook:", error);
+            throw error;
+        }
+    }
+
+    async findWebhook(instanceName: string, apiKey?: string): Promise<any> {
+        try {
+            const response = await fetch(`${this.baseUrl}/webhook/find/${instanceName}`, {
+                method: "GET",
+                headers: this.getHeaders(apiKey),
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) return null;
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || "Failed to find webhook");
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error("Error finding webhook:", error);
+            return null; // Return null on error to avoid breaking list fetch
+        }
+    }
+
+    async sendTextMessage(instanceName: string, number: string, text: string, delay: number = 1200): Promise<any> {
+        try {
+            const body = {
+                number,
+                text
+            };
+
+            const response = await fetch(`${this.baseUrl}/message/sendText/${instanceName}`, {
+                method: "POST",
+                headers: this.getHeaders(),
+                body: JSON.stringify(body),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.message || "Failed to send message");
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error("Error sending message:", error);
+            throw error;
+        }
+    }
+    async fetchChats(instanceName: string): Promise<any[]> {
+        try {
+            const response = await fetch(`${this.baseUrl}/chat/findChats/${instanceName}`, {
+                method: "POST",
+                headers: this.getHeaders(),
+            });
+
+            if (!response.ok) {
+                throw new Error("Failed to fetch chats");
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error("Error fetching chats:", error);
+            return [];
+        }
+    }
+
+    async fetchMessages(instanceName: string, remoteJid: string, limit: number = 50): Promise<any[]> {
+        try {
+            const response = await fetch(`${this.baseUrl}/chat/findMessages/${instanceName}`, {
+                method: "POST",
+                headers: this.getHeaders(),
+                body: JSON.stringify({
+                    where: {
+                        key: {
+                            remoteJid
+                        }
+                    },
+                    options: {
+                        limit,
+                        sort: {
+                            messageTimestamp: "desc"
+                        }
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                // If 404/others, return empty array to not break UI
+                return [];
+            }
+
+            const data = await response.json();
+            // Ensure we return an array. Evolution API might return { messages: [...] } or [...] or { records: [...] }
+            return Array.isArray(data) ? data : (data.messages || data.records || []);
+        } catch (error) {
+            console.error("Error fetching messages:", error);
+            return [];
         }
     }
 }

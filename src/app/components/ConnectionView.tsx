@@ -14,90 +14,80 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 // Helper to generate random suffix like the N8N workflow
 const generateRandomSuffix = () => Math.random().toString(36).substring(2, 8).toUpperCase();
 
-export function ConnectionView() {
+type ConnectionViewProps = {
+  baseUrl: string;
+  setBaseUrl: (url: string) => void;
+  apiKey: string;
+  setApiKey: (key: string) => void;
+  instances: any[];
+  onRefreshInstances: () => void;
+  savedInstances: any[];
+  onRefreshSavedInstances: () => void;
+}
+
+export function ConnectionView({
+  baseUrl,
+  setBaseUrl,
+  apiKey,
+  setApiKey,
+  instances,
+  onRefreshInstances,
+  savedInstances,
+  onRefreshSavedInstances
+}: ConnectionViewProps) {
   const [instanceName, setInstanceName] = useState("");
-  const [apiKey, setApiKey] = useState(localStorage.getItem("evolution_api_key") || "");
-  const [baseUrl, setBaseUrl] = useState(localStorage.getItem("evolution_base_url") || "");
+  const [webhookUrl, setWebhookUrl] = useState(""); // Webhook State
+  // Local state for UI only
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [pollingStatus, setPollingStatus] = useState<string>(""); // Debugging/Feedback
+  const [pollingStatus, setPollingStatus] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [instances, setInstances] = useState<any[]>([]);
   const [selectedInstance, setSelectedInstance] = useState<any>(null);
 
-  // Save credentials to localStorage
-  useEffect(() => {
-    localStorage.setItem("evolution_base_url", baseUrl);
-  }, [baseUrl]);
+  // NOTE: LocalStorage sync is now handled in App.tsx
+  // NOTE: Fetching instances is now handled in App.tsx (received via props)
+  // NOTE: Saved Hosts fetching is now handled in App.tsx (received via props)
 
-  useEffect(() => {
-    localStorage.setItem("evolution_api_key", apiKey);
-  }, [apiKey]);
-
-  // Fetch instances on mount and when baseUrl/apiKey changes
-  useEffect(() => {
-    if (baseUrl && apiKey) {
-      fetchInstancesList();
-    } else {
-      setInstances([]);
-    }
-  }, [baseUrl, apiKey]);
-
-  const fetchInstancesList = async () => {
-    if (!baseUrl || !apiKey) return;
-    try {
-      const apiService = new EvolutionApiService(baseUrl, apiKey);
-      const data = await apiService.fetchInstances();
-      // Evolution API usually returns an array of objects, each containing an 'instance' property
-      setInstances(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error("Failed to fetch instances", e);
-    }
-  };
-
-  const [savedHosts, setSavedHosts] = useState<any[]>([]);
   const [showSavedHosts, setShowSavedHosts] = useState(false);
-
-  // Load saved hosts from backend
-  useEffect(() => {
-    fetchSavedHosts();
-  }, []);
-
-  const fetchSavedHosts = async () => {
-    try {
-      const res = await fetch('http://localhost:3001/hosts');
-      if (res.ok) {
-        const data = await res.json();
-        setSavedHosts(data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch saved hosts:", error);
-    }
-  };
-
-  const saveHostToBackend = async (appName: string, appUrl: string, appKey: string, status?: string, ownerJid?: string, profilePicUrl?: string) => {
-    console.log("Top-level saveHostToBackend:", { appName, appUrl, appKey, status });
+  const saveHostToBackend = async (appName: string, appUrl: string, appKey: string, status?: string, ownerJid?: string, profilePicUrl?: string, appWebhookUrl?: string) => {
+    console.log("Top-level saveHostToBackend:", { appName, appUrl, appKey, status, appWebhookUrl });
     if (!appName || !appUrl || !appKey) {
       toast.error("Dados incompletos ou vazios.");
       return;
     }
+
+    // Check if exists to Update (PUT) instead of Create (POST)
+    const existing = savedInstances.find(s => s.name === appName);
+    const method = existing ? 'PUT' : 'POST';
+    const url = existing ? `http://localhost:3001/hosts/${existing.id}` : 'http://localhost:3001/hosts';
+
+    const body: any = {
+      name: appName,
+      base_url: appUrl,
+      api_key: appKey,
+      status: status || 'unknown',
+      owner_jid: ownerJid || '',
+      profile_pic_url: profilePicUrl || ''
+    };
+
+    // Only include webhook_url if provided, or if creating new (default to empty)
+    if (appWebhookUrl !== undefined) {
+      body.webhook_url = appWebhookUrl;
+    } else if (!existing) {
+      body.webhook_url = '';
+    }
+    // If updating and appWebhookUrl is undefined, we omit it from body so backend COALESCE keeps existing value.
+
     try {
-      const res = await fetch('http://localhost:3001/hosts', {
-        method: 'POST',
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: appName,
-          base_url: appUrl,
-          api_key: appKey,
-          status: status || 'unknown',
-          owner_jid: ownerJid || '',
-          profile_pic_url: profilePicUrl || ''
-        }),
+        body: JSON.stringify(body),
       });
       if (res.ok) {
-        toast.success("Conexão salva no banco de dados!");
-        fetchSavedHosts();
+        toast.success(existing ? "Conexão atualizada!" : "Conexão salva no banco!");
+        onRefreshSavedInstances();
       } else {
         const err = await res.json();
         toast.error(`Erro ao salvar: ${err.error}`);
@@ -117,12 +107,13 @@ export function ConnectionView() {
     const name = prompt("Nome para esta conexão (ex: Servidor Produção):");
     if (!name) return;
 
-    await saveHostToBackend(name, baseUrl, apiKey);
+    await saveHostToBackend(name, baseUrl, apiKey, undefined, undefined, undefined, webhookUrl);
   };
 
   const handleLoadHost = (host: any) => {
     setBaseUrl(host.base_url);
     setApiKey(host.api_key);
+    setWebhookUrl(host.webhook_url || ""); // Load webhook url
     toast.info(`Carregado: ${host.name}`);
     setShowSavedHosts(false);
   };
@@ -132,9 +123,10 @@ export function ConnectionView() {
     try {
       await fetch(`http://localhost:3001/hosts/${id}`, { method: 'DELETE' });
       toast.success("Conexão removida.");
-      fetchSavedHosts();
+      onRefreshSavedInstances();
     } catch (e) {
       toast.error("Erro ao remover.");
+      console.error(e);
     }
   };
 
@@ -163,7 +155,7 @@ export function ConnectionView() {
             setIsConnected(false); // Ensure we don't show the "Connected" card
             setInstanceName(""); // Clear form for next usage
 
-            fetchInstancesList(); // Refresh list
+            onRefreshInstances(); // Refresh list
           } else {
             setPollingStatus(`Aguardando... Status: ${status || 'desconhecido'}`);
           }
@@ -183,101 +175,134 @@ export function ConnectionView() {
     };
   }, [qrCode, isConnected, instanceName, apiKey, baseUrl]);
 
+  const apiService = new EvolutionApiService(baseUrl, apiKey);
+
   const handleGenerateQRCode = async () => {
-    if (!instanceName || !apiKey || !baseUrl) {
-      setError("Por favor, preencha todos os campos.");
+    if (!instanceName) {
+      setError("Por favor, digite um nome para a instância.");
       return;
     }
-
     setIsLoading(true);
     setError(null);
     setQrCode(null);
 
     try {
-      const apiService = new EvolutionApiService(baseUrl, apiKey);
-
       // 1. Create Instance
-      let qrCodeData = null;
-
+      let data;
       try {
-        const createResponse = await apiService.createInstance(instanceName);
-        console.log("Instance created:", createResponse);
-        if (createResponse.qrcode) {
-          if (typeof createResponse.qrcode === 'string') {
-            qrCodeData = createResponse.qrcode;
-          } else {
-            if (createResponse.qrcode.base64) {
-              qrCodeData = createResponse.qrcode.base64;
-            } else {
-              qrCodeData = createResponse.qrcode.pairingCode || createResponse.qrcode.code;
-            }
-          }
-        }
-        fetchInstancesList(); // Refresh list after create
-
-        // Auto-save removed on creation attempt
-        // saveHostToBackend(instanceName, baseUrl, apiKey);
-
+        data = await apiService.createInstance(instanceName, "", "", webhookUrl);
+        console.log("Create Instance Response:", data);
       } catch (e: any) {
-        console.warn("Creation failed (maybe exists?), trying convert/connect...", e.message);
+        // Assume instance might already exist, try to fetch it
+        console.warn("Create failed, checking if exists...", e);
+        const instances = await apiService.fetchInstances();
+        const exists = instances.find((i: any) => i.instance.instanceName === instanceName);
+        if (exists) {
+          data = exists; // Use existing instance data structure if somewhat compatible
+          toast.info("Instância já existe, tentando conectar...");
+        } else {
+          throw e;
+        }
       }
 
-      // 2. Connect (Fetch QR)
-      if (!qrCodeData) {
+      // 2. Connect (Get QR)
+      let qrCodeData: string | null = null;
+
+      // Handle direct QR in creation response or need to call connect
+      if (data?.qrcode) {
+        // If creation returns QR directly (some versions)
+        if (data.qrcode.base64) qrCodeData = data.qrcode.base64;
+        else qrCodeData = data.qrcode.pairingCode || data.qrcode.code;
+      } else {
+        // Explicitly connect
         const connectResponse = await apiService.connectInstance(instanceName);
         console.log("Connect response:", connectResponse);
 
         if (connectResponse.code || connectResponse.base64) {
-          qrCodeData = connectResponse.code || connectResponse.base64;
+          qrCodeData = connectResponse.code || connectResponse.base64 || null;
         } else if ((connectResponse as any).qrcode) {
-          // Handle case where connect returns { qrcode: { base64: ... } } (seen in some versions)
           const qrObj = (connectResponse as any).qrcode;
-          // Priority: 
-          // 1. base64 (if it looks like an image) -> Render as <img>
-          // 2. pairingCode (raw string) -> Render as <QRCodeSVG>
-          // 3. code (raw string) -> Render as <QRCodeSVG>
-
           if (qrObj.base64) {
-            qrCodeData = qrObj.base64; // Evolution API often sends the full data URI or just base64
+            qrCodeData = qrObj.base64;
           } else {
             qrCodeData = qrObj.pairingCode || qrObj.code;
           }
 
           if (!qrCodeData && typeof qrObj === 'string') qrCodeData = qrObj;
-        } else if (connectResponse.instance.status === 'open') {
-          // Already connected during this check
-          toast.success(`Conexão realizada com sucesso! Instância: ${instanceName}`);
+        } else if (connectResponse.instance && connectResponse.instance.status === 'open') {
+          // Already connected
+          toast.success(`Instância ${instanceName} já está conectada!`);
 
-          // Auto-save removed on immediate connection
-          // saveHostToBackend(instanceName, baseUrl, apiKey);
+          // AUTOMATIC WEBHOOK SETUP & PERSISTENCE
+          if (webhookUrl) {
+            try {
+              await apiService.setWebhook(instanceName, webhookUrl, true);
+              toast.success("Webhook configurado automaticamente!");
+            } catch (whErr) {
+              console.error("Auto webhook failed", whErr);
+              toast.error("Falha ao configurar webhook automaticamente.");
+            }
+          }
 
-          setQrCode(null);
-          setIsConnected(false);
-          setInstanceName("");
-          fetchInstancesList();
-          qrCodeData = null;
+          // Auto-save host to DB with Webhook URL
+          await saveHostToBackend(instanceName, baseUrl, apiKey, 'open', connectResponse.instance.ownerJid, connectResponse.instance.profilePicUrl, webhookUrl);
+
+          onRefreshInstances();
+          setIsLoading(false);
+          return;
         }
       }
 
       if (qrCodeData) {
         setQrCode(qrCodeData);
-      } else if (!isConnected) {
-        const instances = await apiService.fetchInstances();
-        setInstances(instances); // Update list
-        const myInstance = instances.find((i: any) => i.instance.instanceName === instanceName);
-        if (myInstance && myInstance.instance.status === 'open') {
-          toast.success(`Conexão realizada com sucesso! Instância: ${instanceName}`);
-          setQrCode(null);
-          setIsConnected(false);
-          setInstanceName("");
-        } else {
-          setError("Não foi possível obter o QR Code. A instância pode estar offline ou já conectada.");
-        }
+        setIsConnected(false); // Waiting scan
+        setPollingStatus("Aguardando leitura do QR Code...");
+
+        // Start polling for connection success
+        const pollInterval = setInterval(async () => {
+          try {
+            // We use a lighter check if possible, or fetch instances
+            const instances = await apiService.fetchInstances();
+            const myInstance = instances.find((i: any) => i.instance.instanceName === instanceName);
+
+            if (myInstance && myInstance.instance.status === 'open') {
+              clearInterval(pollInterval);
+              setQrCode(null);
+              setPollingStatus("");
+              setIsConnected(true);
+              toast.success("Conectado com sucesso!");
+
+              // AUTOMATIC WEBHOOK SETUP & PERSISTENCE AFTER SCAN
+              if (webhookUrl) {
+                try {
+                  await apiService.setWebhook(instanceName, webhookUrl, true);
+                  toast.success("Webhook configurado automaticamente!");
+                } catch (whErr) {
+                  console.error("Auto webhook failed", whErr);
+                }
+              }
+
+              // Auto-save host to DB with Webhook URL
+              await saveHostToBackend(instanceName, baseUrl, apiKey, 'open', myInstance.instance.ownerJid, myInstance.instance.profilePicUrl, webhookUrl);
+
+              onRefreshInstances();
+              setInstanceName(""); // Clear form or keep it? User might want to see it. Let's clear to reset.
+              setWebhookUrl("");
+            }
+          } catch (err) {
+            console.error("Polling error", err);
+          }
+        }, 3000);
+
+        // Cleanup interval on unmount or manual stop (needed?)
+        // simplified for this view
+      } else {
+        setError("Não foi possível obter o QR Code.");
       }
 
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Ocorreu um erro ao conectar com a API.");
+      setError(err.message || "Falha ao criar/conectar instância.");
     } finally {
       setIsLoading(false);
     }
@@ -310,12 +335,24 @@ export function ConnectionView() {
         setIsConnected(false);
         setInstanceName("");
 
-        fetchInstancesList(); // Refresh list
+        // Auto-save host to DB (Update webhook if provided)
+        if (webhookUrl) {
+          try {
+            const apiService = new EvolutionApiService(baseUrl, apiKey);
+            await apiService.setWebhook(nameToCheck, webhookUrl, true);
+            toast.success("Webhook configurado automaticamente!");
+          } catch (whErr) {
+            console.error("Auto webhook failed in checkStatus", whErr);
+          }
+        }
+        await saveHostToBackend(nameToCheck, baseUrl, apiKey, status, stateData?.instance?.ownerJid, stateData?.instance?.profilePicUrl, webhookUrl);
+
+        onRefreshInstances(); // Refresh list
       } else {
         const msg = status ? `Status: ${status}` : "Não foi possível obter o status (resposta inesperada)";
         setError(msg);
       }
-      fetchInstancesList(); // Update list
+      onRefreshInstances(); // Update list
 
     } catch (err: any) {
       setError("Erro ao verificar status: " + err.message);
@@ -337,7 +374,7 @@ export function ConnectionView() {
       await apiService.deleteInstance(nameToDelete);
 
       // 2. Check if exists in DB (Saved Hosts) and delete it
-      const savedHost = savedHosts.find(host => host.name === nameToDelete);
+      const savedHost = savedInstances.find(host => host.name === nameToDelete);
       if (savedHost) {
         try {
           await fetch(`http://localhost:3001/hosts/${savedHost.id}`, { method: 'DELETE' });
@@ -348,8 +385,8 @@ export function ConnectionView() {
       }
 
       toast.success(`Instância ${nameToDelete} excluída.`);
-      fetchInstancesList();
-      fetchSavedHosts(); // Refresh saved hosts list
+      onRefreshInstances();
+      onRefreshSavedInstances(); // Refresh saved hosts list
 
       // Reset current view if we just deleted the active one
       if (instanceName === nameToDelete) {
@@ -381,17 +418,14 @@ export function ConnectionView() {
           <CardHeader className="pb-2">
             <CardTitle className="text-lg flex justify-between items-center">
               Conexões Ativas
-              <Button variant="ghost" size="icon" onClick={() => handleSaveHost()} title="Salvar Novo">
-                <Save className="w-4 h-4" />
-              </Button>
             </CardTitle>
             <CardDescription>Conexões salvas no banco</CardDescription>
           </CardHeader>
           <CardContent className="flex-1 overflow-y-auto space-y-2 pt-0">
-            {savedHosts.length === 0 ? (
+            {savedInstances.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-2">Nenhuma conexão salva.</p>
             ) : (
-              savedHosts.map((host) => {
+              savedInstances.map((host) => {
                 const isOpen = host.status === 'open' || host.status === 'connected';
                 const phoneNumber = host.owner_jid ? host.owner_jid.split('@')[0] : '';
 
@@ -420,6 +454,7 @@ export function ConnectionView() {
                           ownerJid: host.owner_jid,
                           profilePicUrl: host.profile_pic_url,
                           createdAt: host.created_at,
+                          webhookUrl: host.webhook_url,
                           instance: {
                             instanceName: host.name,
                             status: host.status,
@@ -447,11 +482,16 @@ export function ConnectionView() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between text-lg">
               Conexões
-              <Button variant="ghost" size="icon" onClick={fetchInstancesList} title="Atualizar Lista">
+              <Button variant="ghost" size="icon" onClick={onRefreshInstances} title="Atualizar Lista">
                 <RefreshCw className="w-4 h-4" />
               </Button>
             </CardTitle>
-            <CardDescription>Instâncias encontradas na API</CardDescription>
+            <CardDescription>
+              Instâncias encontradas na API
+              <span className="block text-xs text-orange-500 mt-1 font-medium">
+                * Clique no ícone de Salvar ( <Save className="w-3 h-3 inline mb-0.5" /> ) para habilitar o envio e recebimento de mensagens
+              </span>
+            </CardDescription>
           </CardHeader>
           <CardContent className="flex-1 overflow-y-auto space-y-2">
             {instances.length === 0 && (!baseUrl || !apiKey) ? (
@@ -507,7 +547,7 @@ export function ConnectionView() {
                           title="Salvar Conexão"
                           onClick={(e) => {
                             e.stopPropagation();
-                            saveHostToBackend(name, baseUrl, apiKey, status, ownerJid, profilePic);
+                            saveHostToBackend(name, baseUrl, apiKey, status, ownerJid, profilePic, inst.webhookUrl || inst.instance?.webhookUrl);
                           }}
                         >
                           <Save className="w-4 h-4" />
@@ -519,7 +559,11 @@ export function ConnectionView() {
                           title="Verificar Status"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedInstance(inst);
+                            const saved = savedInstances.find(s => s.name === name);
+                            setSelectedInstance({
+                              ...inst,
+                              webhookUrl: saved?.webhook_url
+                            });
                           }}
                         >
                           <Eye className="w-4 h-4" />
@@ -603,6 +647,12 @@ export function ConnectionView() {
                     <span className="font-medium text-muted-foreground">Conectado em:</span>
                     <span className="col-span-2">{formattedDate}</span>
                   </div>
+                  {((inst.webhookUrl) || (inst.instance?.webhookUrl)) && (
+                    <div className="grid grid-cols-3 gap-4">
+                      <span className="font-medium text-muted-foreground">Webhook:</span>
+                      <span className="col-span-2 break-all text-xs flex items-center">{inst.webhookUrl || inst.instance?.webhookUrl}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -669,6 +719,18 @@ export function ConnectionView() {
                     onChange={(e) => setInstanceName(e.target.value)}
                     disabled={isConnected || isLoading}
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="webhook-url-input">URL do Webhook (Opcional)</Label>
+                  <Input
+                    id="webhook-url-input"
+                    placeholder="https://seu-ngrok.app/webhook"
+                    value={webhookUrl}
+                    onChange={(e) => setWebhookUrl(e.target.value)}
+                    disabled={isConnected || isLoading}
+                  />
+                  <p className="text-[11px] text-muted-foreground">Será configurado automaticamente ao conectar.</p>
                 </div>
 
                 {!qrCode && !isConnected && (
@@ -755,6 +817,7 @@ export function ConnectionView() {
                   <li>Clique para criar/gerar o QR Code.</li>
                 </ol>
               </div>
+
             </div>
           </CardContent>
         </Card>

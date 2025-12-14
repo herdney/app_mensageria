@@ -1,2 +1,16 @@
 node_modules
 ferramentas_utilizadas.txt
+
+# Unnecessary/Dev files
+conexao.html
+server/webhook_debug.log
+server/migrate.js
+server/migrate_messages.js
+server/test_enrich_manual.js
+server/inspect_last.js
+server/check_db_count.js
+server/check_webhook_config.js
+ATTRIBUTIONS.md
+ngrok.exe
+dist/
+.env
