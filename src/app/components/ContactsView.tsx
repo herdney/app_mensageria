@@ -68,9 +68,10 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
       // data.type === 'MESSAGES_UPSERT'
       const eventType = (data.type || data.event || "").toUpperCase();
 
-      if (eventType === 'MESSAGES_UPSERT' || eventType === 'MESSAGES.UPSERT') {
+      if (['MESSAGES.UPSERT', 'MESSAGES_UPSERT', 'SEND.MESSAGE'].includes(eventType)) {
         const payload = data.data || data.payload;
-        const msgs = Array.isArray(payload?.messages) ? payload.messages : [payload];
+        // Normalize messages to array
+        const msgs = Array.isArray(payload?.messages) ? payload.messages : [payload].filter(Boolean);
 
         msgs.forEach((msg: any) => {
           if (!msg || !msg.key) return;
@@ -80,11 +81,14 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
           const remotePhone = remoteJid ? remoteJid.split('@')[0] : '';
 
           // Check if this message belongs to the currently selected contact
-          if (selectedContact && remotePhone === selectedContact.phoneNumber) {
+          // We check against phoneNumber OR id explicitly to be safe
+          if (selectedContact && (remotePhone === selectedContact.phoneNumber || remoteJid === selectedContact.id)) {
             // Determine text content
             let text = "";
             if (msg.message?.conversation) text = msg.message.conversation;
             else if (msg.message?.extendedTextMessage?.text) text = msg.message.extendedTextMessage.text;
+            else if (msg.message?.imageMessage?.caption) text = msg.message.imageMessage.caption;
+            else if (msg.message?.imageMessage) text = "[Imagem]";
             else text = "[Mídia/Outro Tipo]";
 
             const newMessage: Message = {
@@ -94,7 +98,11 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
 
-            setMessages(prev => [...prev, newMessage]);
+            setMessages(prev => {
+              // Avoid duplicates
+              if (prev.some(m => m.id === newMessage.id)) return prev;
+              return [...prev, newMessage];
+            });
           }
         });
       }
@@ -189,10 +197,25 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
       await apiService.sendTextMessage(selectedInstance.name, selectedContact.phoneNumber, textToSend);
       // Success
     } catch (e: any) {
-      toast.error("Falha ao enviar mensagem.");
       console.error(e);
-      // Remove optimistic message on failure? Or show error state?
-      // for now just simple error toast
+      let errorMessage = e.message || "Erro desconhecido";
+
+      // Try to parse specific Evolution API errors
+      try {
+        // e.message might be "[400] {...}"
+        const jsonPart = errorMessage.substring(errorMessage.indexOf('{'));
+        const errorObj = JSON.parse(jsonPart);
+
+        if (errorObj?.response?.message?.[0]?.exists === false) {
+          errorMessage = "Este número não possui uma conta no WhatsApp.";
+        } else if (errorObj?.error) {
+          errorMessage = errorObj.error;
+        }
+      } catch (parseErr) {
+        // Fallback to original message if parsing fails
+      }
+
+      toast.error(`Falha ao enviar: ${errorMessage}`);
     } finally {
       setIsSending(false);
     }

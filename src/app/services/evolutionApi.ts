@@ -260,7 +260,8 @@ export class EvolutionApiService {
         try {
             const body = {
                 number,
-                text
+                text,
+                delay
             };
 
             const response = await fetch(`${this.baseUrl}/message/sendText/${instanceName}`, {
@@ -270,8 +271,8 @@ export class EvolutionApiService {
             });
 
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || "Failed to send message");
+                const errorData = await response.json().catch(err => ({ rawError: err.message }));
+                throw new Error(`[${response.status}] ${JSON.stringify(errorData)}`);
             }
 
             return await response.json();

@@ -52,48 +52,57 @@ export default function App() {
       const eventType = (data.type || data.event || "").toUpperCase();
 
 
-      if (eventType === 'MESSAGES.UPSERT' || eventType === 'MESSAGES_UPSERT' || eventType === 'SEND.MESSAGE') {
-        const payload = data.data;
-        // Handle both single message object and messages array (Evolution API variations)
-        const msg = Array.isArray(payload?.messages) ? payload.messages[0] : payload;
+      if (['MESSAGES.UPSERT', 'MESSAGES_UPSERT', 'SEND.MESSAGE'].includes(eventType)) {
+        const payload = data.data || data.payload;
+        // Normalize messages to array
+        const msgs = Array.isArray(payload?.messages) ? payload.messages : [payload].filter(Boolean);
 
-        if (!msg || !msg.key) return;
+        msgs.forEach((msg: any) => {
+          if (!msg || !msg.key) return;
 
-        const remoteJid = msg.key.remoteJid;
-        const isGroup = remoteJid?.includes('@g.us');
+          const remoteJid = msg.key.remoteJid;
+          const isGroup = remoteJid?.includes('@g.us');
 
-        // Only handle private chats for now
-        if (!isGroup && remoteJid) {
-          setContacts(prev => {
-            const existingIndex = prev.findIndex(c => c.id === remoteJid);
-            const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || "Nova mensagem";
-            const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          // Only handle private chats for now
+          if (!isGroup && remoteJid) {
+            setContacts(prev => {
+              const existingIndex = prev.findIndex(c => c.id === remoteJid);
+              const messageContent = msg.message?.conversation || msg.message?.extendedTextMessage?.text || msg.message?.imageMessage?.caption || (msg.message?.imageMessage ? "[Imagem]" : "Nova mensagem");
+              const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-            if (existingIndex > -1) {
-              // Move to top and update
-              const updated = [...prev];
-              const [moved] = updated.splice(existingIndex, 1);
-              moved.lastMessage = messageContent;
-              moved.time = timestamp;
-              return [moved, ...updated];
-            } else {
-              // Add new contact
               const fromMe = msg.key?.fromMe;
-              // If fromMe (outgoing), msg.pushName is MY name, not the contact's.
-              // So we default to the number, and let enrichment fill it later.
-              const initialName = (!fromMe && msg.pushName) ? msg.pushName : remoteJid.split('@')[0];
 
-              const newContact: Contact = {
-                id: remoteJid,
-                name: initialName,
-                phoneNumber: remoteJid.split('@')[0],
-                lastMessage: messageContent,
-                time: timestamp
-              };
-              return [newContact, ...prev];
-            }
-          });
-        }
+              if (existingIndex > -1) {
+                // Move to top and update
+                const updated = [...prev];
+                const [moved] = updated.splice(existingIndex, 1);
+                moved.lastMessage = messageContent;
+                moved.time = timestamp;
+                return [moved, ...updated];
+              } else {
+                // Add new contact
+                const initialName = (!fromMe && msg.pushName) ? msg.pushName : remoteJid.split('@')[0];
+
+                const newContact: Contact = {
+                  id: remoteJid,
+                  name: initialName,
+                  phoneNumber: remoteJid.split('@')[0],
+                  lastMessage: messageContent,
+                  time: timestamp
+                };
+                return [newContact, ...prev];
+              }
+            });
+
+            // Should also update selectedContact if it matches
+            setSelectedContact(prev => {
+              if (prev && prev.id === remoteJid) {
+                return { ...prev, lastMessage: (msg.message?.conversation || "Nova mensagem"), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+              }
+              return prev;
+            });
+          }
+        });
       }
     });
 
@@ -301,10 +310,13 @@ export default function App() {
           } catch (error) {
             console.error(error);
             toast.error("Erro ao enviar mensagem");
+            // Refresh contacts to ensure UI sync with DB (removes invalid contacts)
+            fetchContacts();
             throw error;
           }
         }}
         hasConnections={savedInstances.length > 0}
+        onRefresh={fetchContacts}
       />
 
       <main className="flex-1">
