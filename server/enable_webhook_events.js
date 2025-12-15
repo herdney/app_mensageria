@@ -14,17 +14,14 @@ async function enableEvents() {
     try {
         await client.connect();
 
-        const { rows } = await client.query("SELECT base_url, api_key, webhook_url FROM evolution_hosts WHERE name = 'Herd'");
+        const { rows } = await client.query("SELECT base_url, api_key, webhook_url FROM evolution_hosts WHERE name = $1");
         if (rows.length === 0) {
-            console.log("Instance 'Herd' not found.");
             return;
         }
         const { base_url, api_key, webhook_url } = rows[0];
-
-        console.log(`Updating Webhook for Herd at ${base_url}...`);
         console.log(`URL: ${webhook_url}`);
 
-        const response = await fetch(`${base_url}/webhook/set/Herd`, {
+        const response = await fetch(`${base_url}/webhook/set/INSTANCE_NAME`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
