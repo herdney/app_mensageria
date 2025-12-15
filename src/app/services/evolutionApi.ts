@@ -71,7 +71,7 @@ export class EvolutionApiService {
                     url: webhookUrl,
                     byEvents: false,
                     base64: true,
-                    events: ["MESSAGES_UPSERT"]
+                    events: ["MESSAGES_UPSERT", "SEND_MESSAGE"]
                 };
             }
 
@@ -219,7 +219,8 @@ export class EvolutionApiService {
                         "GROUPS_UPSERT",
                         "GROUPS_UPDATE",
                         "GROUP_PARTICIPANTS_UPDATE",
-                        "CONNECTION_UPDATE"
+                        "CONNECTION_UPDATE",
+                        "SEND_MESSAGE"
                     ]
                 }),
             });
@@ -266,7 +267,7 @@ export class EvolutionApiService {
                 delay
             };
 
-            const response = await fetch(`http://localhost:3001/message/sendText`, {
+            const response = await fetch(`/message/sendText`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" }, // No API key needed for local proxy
                 body: JSON.stringify(body),

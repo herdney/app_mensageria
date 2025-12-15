@@ -1792,3 +1792,393 @@
   "apikey": "9B539CBD-B6B1-460E-8DB8-59F2FB6F4F2E"
 }
 ---
+{
+  "event": "messages.upsert",
+  "instance": "Herdney",
+  "data": {
+    "key": {
+      "remoteJid": "554196870884@s.whatsapp.net",
+      "remoteJidAlt": "193518358266105@lid",
+      "fromMe": false,
+      "id": "3A54429FD44E2D3FB8E2",
+      "participant": "",
+      "addressingMode": "pn"
+    },
+    "pushName": "Cleu",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "conversation": "Boa noite",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyIndexes": [],
+          "recipientKeyIndexes": [],
+          "senderTimestamp": {
+            "low": 1765762562,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyHash": {
+            "0": 18,
+            "1": 60,
+            "2": 115,
+            "3": 92,
+            "4": 255,
+            "5": 142,
+            "6": 115,
+            "7": 237,
+            "8": 101,
+            "9": 54
+          },
+          "recipientTimestamp": {
+            "low": 1765759960,
+            "high": 0,
+            "unsigned": true
+          }
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": {
+          "0": 159,
+          "1": 39,
+          "2": 38,
+          "3": 82,
+          "4": 99,
+          "5": 78,
+          "6": 65,
+          "7": 164,
+          "8": 22,
+          "9": 197,
+          "10": 105,
+          "11": 200,
+          "12": 76,
+          "13": 172,
+          "14": 89,
+          "15": 127,
+          "16": 18,
+          "17": 117,
+          "18": 100,
+          "19": 188,
+          "20": 146,
+          "21": 59,
+          "22": 245,
+          "23": 43,
+          "24": 146,
+          "25": 176,
+          "26": 67,
+          "27": 4,
+          "28": 158,
+          "29": 244,
+          "30": 87,
+          "31": 52
+        }
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1765774148,
+    "instanceId": "8264c947-3072-460b-af2b-126d20634f75",
+    "source": "ios"
+  },
+  "destination": "https://04e9f151acc4.ngrok-free.app/webhook",
+  "date_time": "2025-12-15T01:49:08.483Z",
+  "sender": "554196386712@s.whatsapp.net",
+  "server_url": "https://evo-cmh2.nextcomm.tech",
+  "apikey": "9B539CBD-B6B1-460E-8DB8-59F2FB6F4F2E"
+}
+---
+{
+  "event": "send.message",
+  "instance": "Herdney",
+  "data": {
+    "key": {
+      "remoteJid": "554196870884@s.whatsapp.net",
+      "fromMe": true,
+      "id": "3EB0A1E753029F836CEA53"
+    },
+    "pushName": "Você",
+    "status": "PENDING",
+    "message": {
+      "conversation": "Boa noite! Em que posso ajudar você?"
+    },
+    "contextInfo": {
+      "mentionedJid": [],
+      "groupMentions": [],
+      "ephemeralSettingTimestamp": {
+        "low": 1765601353,
+        "high": 0,
+        "unsigned": false
+      },
+      "disappearingMode": {
+        "initiator": 0
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1765774153,
+    "instanceId": "8264c947-3072-460b-af2b-126d20634f75",
+    "source": "web"
+  },
+  "destination": "https://04e9f151acc4.ngrok-free.app/webhook",
+  "date_time": "2025-12-15T01:49:13.844Z",
+  "sender": "554196386712@s.whatsapp.net",
+  "server_url": "https://evo-cmh2.nextcomm.tech",
+  "apikey": "9B539CBD-B6B1-460E-8DB8-59F2FB6F4F2E"
+}
+---
+{
+  "event": "messages.upsert",
+  "instance": "Herdney",
+  "data": {
+    "key": {
+      "remoteJid": "554196870884@s.whatsapp.net",
+      "remoteJidAlt": "193518358266105@lid",
+      "fromMe": false,
+      "id": "3A39919FFE8FB79BCAA5",
+      "participant": "",
+      "addressingMode": "pn"
+    },
+    "pushName": "Cleu",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "conversation": "Apenas te testando assistente",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyIndexes": [],
+          "recipientKeyIndexes": [],
+          "senderTimestamp": {
+            "low": 1765762562,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyHash": {
+            "0": 18,
+            "1": 60,
+            "2": 115,
+            "3": 92,
+            "4": 255,
+            "5": 142,
+            "6": 115,
+            "7": 237,
+            "8": 101,
+            "9": 54
+          },
+          "recipientTimestamp": {
+            "low": 1765759960,
+            "high": 0,
+            "unsigned": true
+          }
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": {
+          "0": 254,
+          "1": 106,
+          "2": 118,
+          "3": 198,
+          "4": 161,
+          "5": 226,
+          "6": 243,
+          "7": 117,
+          "8": 252,
+          "9": 109,
+          "10": 52,
+          "11": 83,
+          "12": 13,
+          "13": 10,
+          "14": 70,
+          "15": 77,
+          "16": 36,
+          "17": 76,
+          "18": 194,
+          "19": 144,
+          "20": 191,
+          "21": 40,
+          "22": 103,
+          "23": 27,
+          "24": 56,
+          "25": 245,
+          "26": 18,
+          "27": 84,
+          "28": 198,
+          "29": 139,
+          "30": 150,
+          "31": 17
+        }
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1765774172,
+    "instanceId": "8264c947-3072-460b-af2b-126d20634f75",
+    "source": "ios"
+  },
+  "destination": "https://04e9f151acc4.ngrok-free.app/webhook",
+  "date_time": "2025-12-15T01:49:32.845Z",
+  "sender": "554196386712@s.whatsapp.net",
+  "server_url": "https://evo-cmh2.nextcomm.tech",
+  "apikey": "9B539CBD-B6B1-460E-8DB8-59F2FB6F4F2E"
+}
+---
+{
+  "event": "send.message",
+  "instance": "Herdney",
+  "data": {
+    "key": {
+      "remoteJid": "554196870884@s.whatsapp.net",
+      "fromMe": true,
+      "id": "3EB0919A88301E340A2BA9"
+    },
+    "pushName": "Você",
+    "status": "PENDING",
+    "message": {
+      "conversation": "Sem problemas! Estou aqui para ajudar quando precisar. 😉"
+    },
+    "contextInfo": {
+      "mentionedJid": [],
+      "groupMentions": [],
+      "ephemeralSettingTimestamp": {
+        "low": 1765601377,
+        "high": 0,
+        "unsigned": false
+      },
+      "disappearingMode": {
+        "initiator": 0
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1765774177,
+    "instanceId": "8264c947-3072-460b-af2b-126d20634f75",
+    "source": "web"
+  },
+  "destination": "https://04e9f151acc4.ngrok-free.app/webhook",
+  "date_time": "2025-12-15T01:49:37.391Z",
+  "sender": "554196386712@s.whatsapp.net",
+  "server_url": "https://evo-cmh2.nextcomm.tech",
+  "apikey": "9B539CBD-B6B1-460E-8DB8-59F2FB6F4F2E"
+}
+---
+{
+  "event": "messages.upsert",
+  "instance": "Herdney",
+  "data": {
+    "key": {
+      "remoteJid": "554196870884@s.whatsapp.net",
+      "remoteJidAlt": "193518358266105@lid",
+      "fromMe": false,
+      "id": "3A940BECCF6BBCDDC3CF",
+      "participant": "",
+      "addressingMode": "pn"
+    },
+    "pushName": "Cleu",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "conversation": "Queria saber se estava trabalhando",
+      "messageContextInfo": {
+        "deviceListMetadata": {
+          "senderKeyIndexes": [],
+          "recipientKeyIndexes": [],
+          "senderTimestamp": {
+            "low": 1765762562,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyHash": {
+            "0": 18,
+            "1": 60,
+            "2": 115,
+            "3": 92,
+            "4": 255,
+            "5": 142,
+            "6": 115,
+            "7": 237,
+            "8": 101,
+            "9": 54
+          },
+          "recipientTimestamp": {
+            "low": 1765759960,
+            "high": 0,
+            "unsigned": true
+          }
+        },
+        "deviceListMetadataVersion": 2,
+        "messageSecret": {
+          "0": 63,
+          "1": 98,
+          "2": 1,
+          "3": 128,
+          "4": 56,
+          "5": 171,
+          "6": 192,
+          "7": 151,
+          "8": 141,
+          "9": 220,
+          "10": 115,
+          "11": 245,
+          "12": 94,
+          "13": 194,
+          "14": 90,
+          "15": 175,
+          "16": 148,
+          "17": 41,
+          "18": 192,
+          "19": 26,
+          "20": 248,
+          "21": 127,
+          "22": 235,
+          "23": 179,
+          "24": 128,
+          "25": 165,
+          "26": 187,
+          "27": 69,
+          "28": 14,
+          "29": 168,
+          "30": 128,
+          "31": 26
+        }
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1765774191,
+    "instanceId": "8264c947-3072-460b-af2b-126d20634f75",
+    "source": "ios"
+  },
+  "destination": "https://04e9f151acc4.ngrok-free.app/webhook",
+  "date_time": "2025-12-15T01:49:51.202Z",
+  "sender": "554196386712@s.whatsapp.net",
+  "server_url": "https://evo-cmh2.nextcomm.tech",
+  "apikey": "9B539CBD-B6B1-460E-8DB8-59F2FB6F4F2E"
+}
+---
+{
+  "event": "send.message",
+  "instance": "Herdney",
+  "data": {
+    "key": {
+      "remoteJid": "554196870884@s.whatsapp.net",
+      "fromMe": true,
+      "id": "3EB015128754E7B4B83B26"
+    },
+    "pushName": "Você",
+    "status": "PENDING",
+    "message": {
+      "conversation": "No momento, o Herdney não está disponível. Posso ajudar com algo específico ou deixar um recado para ele retornar assim que possível?"
+    },
+    "contextInfo": {
+      "mentionedJid": [],
+      "groupMentions": [],
+      "ephemeralSettingTimestamp": {
+        "low": 1765601395,
+        "high": 0,
+        "unsigned": false
+      },
+      "disappearingMode": {
+        "initiator": 0
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1765774195,
+    "instanceId": "8264c947-3072-460b-af2b-126d20634f75",
+    "source": "web"
+  },
+  "destination": "https://04e9f151acc4.ngrok-free.app/webhook",
+  "date_time": "2025-12-15T01:49:55.845Z",
+  "sender": "554196386712@s.whatsapp.net",
+  "server_url": "https://evo-cmh2.nextcomm.tech",
+  "apikey": "9B539CBD-B6B1-460E-8DB8-59F2FB6F4F2E"
+}
+---

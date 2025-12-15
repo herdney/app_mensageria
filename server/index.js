@@ -685,6 +685,28 @@ async function handleAgentAutoReply(instanceName, remoteJid, content, senderName
     }
 }
 
+
+// --- SERVE STATIC FRONTEND (Docker/Production) ---
+// --- SERVE STATIC FRONTEND ---
+const fs = require('fs');
+const distPath = path.join(__dirname, '../dist');
+const publicPath = path.join(__dirname, 'public');
+
+// Docker/Production (Dockerfile copies dist to server/public)
+if (fs.existsSync(path.join(publicPath, 'index.html'))) {
+    console.log(`Serving static files from ${publicPath}`);
+    app.use(express.static(publicPath));
+    app.get('*', (req, res) => res.sendFile(path.join(publicPath, 'index.html')));
+}
+// Local Development (dist usually in root)
+else if (fs.existsSync(path.join(distPath, 'index.html'))) {
+    console.log(`Serving static files from ${distPath}`);
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+} else {
+    console.warn("No static frontend found in 'public' or '../dist'.");
+}
+
 server.listen(port, () => {
     console.log(`Server running with Socket.io on port ${port}`);
 });

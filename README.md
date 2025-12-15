@@ -93,6 +93,50 @@ npm run dev
 ```
 Acesse `http://localhost:5173` no seu navegador.
 
+## 🐳 Deploy com Docker (Stack)
+
+Para rodar o projeto em produção usando Docker Swarm ou Docker Compose, utilize a stack abaixo. Certifique-se de que o serviço do PostgreSQL esteja acessível na mesma rede ou ajuste a variável `DB_HOST`.
+
+1. Crie um arquivo `docker-stack.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  mensageria:
+    image: herdneysantos/mensageria-app:latest
+    environment:
+      - PORT=3001
+      - DB_HOST=postgres # Nome do serviço do banco na rede
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=sua_senha_do_banco
+      - DB_NAME=mensageria
+      - OPENAI_API_KEY=sk-... # Sua chave da OpenAI
+    networks:
+      - cmh # Rede onde o banco e o Traefik estão rodando
+    deploy:
+      mode: replicated
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.mensageria-http.rule=Host(`mensageria.seu-dominio.com`)"
+        - "traefik.http.routers.mensageria-http.entrypoints=web"
+        - "traefik.http.routers.mensageria.rule=Host(`mensageria.seu-dominio.com`)"
+        - "traefik.http.routers.mensageria.entrypoints=websecure"
+        - "traefik.http.routers.mensageria.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.mensageria.loadbalancer.server.port=3001"
+
+networks:
+  cmh:
+    external: true
+```
+
+2. Faça o deploy da stack:
+```bash
+docker stack deploy -c docker-stack.yml mensageria
+```
+
 ## 📖 Como Usar
 
 1.  **Conexão:** Vá até a aba de **Conexão**, insira a URL e API Key da sua Evolution API e crie uma nova instância (QR Code).

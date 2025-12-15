@@ -148,7 +148,7 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
 
     const loadHistory = async () => {
       try {
-        const response = await fetch(`http://localhost:3001/messages/${selectedInstance.name}/${selectedContact.id}?limit=50`);
+        const response = await fetch(`/messages/${selectedInstance.name}/${selectedContact.id}?limit=50`);
         const history = await response.json();
 
         if (!history || !Array.isArray(history)) {

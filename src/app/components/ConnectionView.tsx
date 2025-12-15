@@ -60,7 +60,7 @@ export function ConnectionView({
     // Check if exists to Update (PUT) instead of Create (POST)
     const existing = savedInstances.find(s => s.name === appName);
     const method = existing ? 'PUT' : 'POST';
-    const url = existing ? `http://localhost:3001/hosts/${existing.id}` : 'http://localhost:3001/hosts';
+    const url = existing ? `/hosts/${existing.id}` : '/hosts';
 
     const body: any = {
       name: appName,
@@ -121,7 +121,7 @@ export function ConnectionView({
   const handleDeleteHost = async (id: number) => {
     if (!confirm("Remover esta conexão salva?")) return;
     try {
-      await fetch(`http://localhost:3001/hosts/${id}`, { method: 'DELETE' });
+      await fetch(`/hosts/${id}`, { method: 'DELETE' });
       toast.success("Conexão removida.");
       onRefreshSavedInstances();
     } catch (e) {
@@ -377,7 +377,7 @@ export function ConnectionView({
       const savedHost = savedInstances.find(host => host.name === nameToDelete);
       if (savedHost) {
         try {
-          await fetch(`http://localhost:3001/hosts/${savedHost.id}`, { method: 'DELETE' });
+          await fetch(`/hosts/${savedHost.id}`, { method: 'DELETE' });
           toast.success("Conexão removida do banco de dados.");
         } catch (err) {
           console.error("Failed to delete from DB", err);

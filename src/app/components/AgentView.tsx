@@ -54,7 +54,7 @@ export function AgentView() {
 
   const fetchAgents = async () => {
     try {
-      const res = await fetch("http://localhost:3001/agents");
+      const res = await fetch("/agents");
       if (res.ok) {
         const data = await res.json();
         // Map snake_case from DB to camelCase for Frontend
@@ -103,8 +103,8 @@ export function AgentView() {
     try {
       const method = currentAgent.id ? "PUT" : "POST";
       const url = currentAgent.id
-        ? `http://localhost:3001/agents/${currentAgent.id}`
-        : "http://localhost:3001/agents";
+        ? `/agents/${currentAgent.id}`
+        : "/agents";
 
       const res = await fetch(url, {
         method,
@@ -129,7 +129,7 @@ export function AgentView() {
   const handleDeleteAgent = async (id: string) => {
     if (!confirm("Tem certeza que deseja excluir este agente?")) return;
     try {
-      const res = await fetch(`http://localhost:3001/agents/${id}`, { method: "DELETE" });
+      const res = await fetch(`/agents/${id}`, { method: "DELETE" });
       if (res.ok) {
         toast.success("Agente removido");
         fetchAgents();
@@ -164,7 +164,7 @@ export function AgentView() {
         api_key: agentToUpdate.api_key
       };
 
-      const res = await fetch(`http://localhost:3001/agents/${id}`, {
+      const res = await fetch(`/agents/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

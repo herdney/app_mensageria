@@ -160,7 +160,7 @@ export default function App() {
   // Fetch Saved Hosts from DB
   const fetchSavedInstances = async () => {
     try {
-      const res = await fetch('http://localhost:3001/hosts');
+      const res = await fetch('/hosts');
       if (res.ok) {
         const data = await res.json();
         setSavedInstances(data);
@@ -249,7 +249,7 @@ export default function App() {
   const fetchContacts = async () => {
     if (!baseUrl || !apiKey || !selectedInstance) return;
     try {
-      const res = await fetch(`http://localhost:3001/contacts/${selectedInstance.name}`);
+      const res = await fetch(`/contacts/${selectedInstance.name}`);
       const dbContacts = await res.json();
 
       let mapped: Contact[] = [];
