@@ -11,15 +11,15 @@ Este projeto permite conectar e gerenciar múltiplas contas do WhatsApp em uma �
 
 ### ✨ Principais Funcionalidades
 
-*   **Multiatendimento & Multi-instância:** Gerencie várias conexões do WhatsApp simultaneamente.
+*   **Atendimento & Multi-instância:** Gerencie várias conexões do WhatsApp simultaneamente.
 *   **Chat em Tempo Real:** Interface reativa via Socket.io para envio e recebimento instantâneo de mensagens.
 *   **🤖 Agentes de IA:**
     *   Crie agentes com personalidades e funções específicas.
     *   Defina horários de funcionamento.
     *   Configure palavras-chave de ativação.
     *   Contexto de conversa inteligente (memória das últimas mensagens).
-*   **Gestão de Contatos:** Sincronização local de contatos e histórico de mensagens.
-*   **Interface Moderna:** Construída com React, TailwindCSS e Shadcn/ui para uma experiência premium.
+*   **Lista Contatos:** Sincronização local de contatos e histórico de mensagens.
+*   **Interface Moderna:** Construída com React, TailwindCSS e Shadcn/ui.
 
 ## 🛠️ Tecnologias Utilizadas
 
