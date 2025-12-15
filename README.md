@@ -1,6 +1,6 @@
 # App Mensageria 🚀
 
-Uma plataforma centralizada para gestão de múltiplas instâncias do WhatsApp com capacidades avançadas de Agentes de IA. Construído sobre a [Evolution API v2](https://github.com/EvolutionAPI/evolution-api).
+Uma plataforma centralizada para gestão de múltiplas instâncias do WhatsApp com Agentes de IA. Construído sobre a [Evolution API v2](https://github.com/EvolutionAPI/evolution-api).
 
 ![Status](https://img.shields.io/badge/Status-Em_Desenvolvimento-yellow)
 ![Stack](https://img.shields.io/badge/Stack-React_Start_NodeJS_Postgres-blue)
