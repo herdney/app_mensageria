@@ -263,7 +263,7 @@ export function ConnectionView({
           try {
             // We use a lighter check if possible, or fetch instances
             const instances = await apiService.fetchInstances();
-            const myInstance = instances.find((i: any) => i.instance.instanceName === instanceName);
+            const myInstance = instances.find((i: any) => i.instance?.instanceName === instanceName);
 
             if (myInstance && myInstance.instance.status === 'open') {
               clearInterval(pollInterval);

@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  mensageria:
+    image: herdneysantos/mensageria-app:latest
+    environment:
+      - PORT=3001
+      - DB_HOST=178.156.141.219
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=458e19f01ac2eea293f56f356c9adfdf
+      - DB_NAME=mensageria
+      - OPENAI_API_KEY=sk-sua-chave-aqui
+    networks:
+      - traefik-public # Rede externa onde o Traefik roda
+      - db-network     # Rede para comunicação com o banco (se estiver no swarm)
+    deploy:
+      mode: replicated
+      replicas: 1
+      labels:
+        # Habilitar Traefik
+        - "traefik.enable=true"
+        
+        # Router: HTTP (Redirecionamento para HTTPS opcional, ajuste conforme seu setup)
+        - "traefik.http.routers.mensageria-http.rule=Host(`app.seudominio.com.br`)"
+        - "traefik.http.routers.mensageria-http.entrypoints=web"
+        
+        # Router: HTTPS
+        - "traefik.http.routers.mensageria.rule=Host(`app.seudominio.com.br`)"
+        - "traefik.http.routers.mensageria.entrypoints=websecure"
+        - "traefik.http.routers.mensageria.tls.certresolver=myresolver" # Ajuste para o nome do seu resolver (ex: letsencrypt)
+        
+        # Service: Porta da aplicação
+        - "traefik.http.services.mensageria.loadbalancer.server.port=3001"
+
+networks:
+  traefik-public:
+    external: true
+  db-network:
+    external: true # Assumindo que o banco também está no swarm, ou remova se for externo

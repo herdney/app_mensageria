@@ -258,21 +258,23 @@ export class EvolutionApiService {
 
     async sendTextMessage(instanceName: string, number: string, text: string, delay: number = 1200): Promise<any> {
         try {
+            // Use local proxy to ensure persistence and correct error handling
             const body = {
+                instanceName, // Required for proxy lookup
                 number,
                 text,
                 delay
             };
 
-            const response = await fetch(`${this.baseUrl}/message/sendText/${instanceName}`, {
+            const response = await fetch(`http://localhost:3001/message/sendText`, {
                 method: "POST",
-                headers: this.getHeaders(),
+                headers: { "Content-Type": "application/json" }, // No API key needed for local proxy
                 body: JSON.stringify(body),
             });
 
             if (!response.ok) {
                 const errorData = await response.json().catch(err => ({ rawError: err.message }));
-                throw new Error(`[${response.status}] ${JSON.stringify(errorData)}`);
+                throw new Error(errorData.error || errorData.message || JSON.stringify(errorData));
             }
 
             return await response.json();

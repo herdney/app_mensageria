@@ -38,7 +38,7 @@ io.on('connection', (socket) => {
 });
 
 // WEBHOOK Endpoint - Receiving events from Evolution API
-app.post('/webhook', async (req, res) => {
+app.post(['/webhook', '/webhook/*'], async (req, res) => {
     try {
         let events = req.body;
 
@@ -453,6 +453,160 @@ app.delete('/agents/:id', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Failed to delete agent' });
+    }
+});
+
+// --- PROXY MESSAGE SENDING (OPTIMISTIC SAVING) ---
+app.post('/message/sendText', async (req, res) => {
+    const { instanceName, number, text, delay } = req.body;
+
+    if (!instanceName || !number || !text) {
+        return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    try {
+        // 1. Fetch Credentials First
+        const { rows } = await db.query('SELECT base_url, api_key FROM evolution_hosts WHERE name = $1', [instanceName]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Instance not found' });
+        }
+        const { base_url, api_key } = rows[0];
+
+        // 2. Validate/Normalize Number
+        // Strategy: 
+        // A. Check if valid contact already exists in OUR DB (Exact or Fuzzy for Brazil)
+        // B. Ask Evolution API (Whatsapp) if the number exists
+
+        let remoteJid = `${number}@s.whatsapp.net`;
+        let numberToSend = number;
+        let finalNumber = number; // The number part of JID
+
+        // Helper for Brazil 9-digit handling (55 + 2 digits DDD + 9 + 8 digits phone)
+        const isBrazilMobile = (num) => num.length === 13 && num.startsWith('55') && num[4] === '9';
+        const to8Digits = (num) => isBrazilMobile(num) ? (num.substring(0, 4) + num.substring(5)) : num;
+
+        // A. DB Check
+        try {
+            // Check exact first
+            let dbRes = await db.query('SELECT remote_jid FROM contacts WHERE instance_name = $1 AND (remote_jid LIKE $2 OR remote_jid LIKE $3)',
+                [instanceName, `${number}%`, `${to8Digits(number)}%`]);
+
+            if (dbRes.rows.length > 0) {
+                // If found, prefer the existing JID
+                remoteJid = dbRes.rows[0].remote_jid;
+                finalNumber = remoteJid.split('@')[0];
+                numberToSend = finalNumber; // Send to the 'real' number if found
+                console.log(`[PROXY] Found existing contact in DB: ${remoteJid}`);
+            } else {
+                // B. API Check (If not in DB)
+                // Try checking the input number AND the 8-digit version if applicable
+                // CRITICAL: Check 8-digit version FIRST. If it exists, use it. This prevents duplicates where API accepts 9-digit but returns 8-digit webhook.
+                let numbersToCheck = [];
+                if (isBrazilMobile(number)) {
+                    numbersToCheck.push(to8Digits(number)); // Priority 1: 8 Digits (Canonical)
+                    if (number !== to8Digits(number)) numbersToCheck.push(number); // Priority 2: Original
+                } else {
+                    numbersToCheck.push(number);
+                }
+
+                const checkRes = await fetch(`${base_url}/chat/whatsappNumber/${instanceName}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'apikey': api_key },
+                    body: JSON.stringify({ numbers: numbersToCheck })
+                });
+
+                if (checkRes.ok) {
+                    const checkData = await checkRes.json();
+                    if (Array.isArray(checkData)) {
+                        // Find the first one that exists
+                        const found = checkData.find(x => x.exists);
+                        if (found) {
+                            // API confirmed existence.
+                            // However, for DB storage, we MUST FORCE standard 8-digit JID for Brazil to match Webhooks.
+                            // Evolution/WhatsApp often returns 9-digit "exists" but sends events with 8-digit JID.
+                            let confirmedJid = found.jid;
+                            let confirmedNumber = confirmedJid.split('@')[0];
+
+                            numberToSend = confirmedNumber; // Send to what exists
+
+                            if (isBrazilMobile(confirmedNumber)) {
+                                console.log(`[PROXY] Forcing JID to 8 digits for DB consistency: ${confirmedNumber}`);
+                                finalNumber = to8Digits(confirmedNumber);
+                                remoteJid = `${finalNumber}@s.whatsapp.net`;
+                            } else {
+                                remoteJid = confirmedJid;
+                            }
+
+                            console.log(`[PROXY] Normalized ${number} -> Send: ${numberToSend}, DB: ${remoteJid}`);
+
+                        } else {
+                            // STRICT CHECK: If API responded but said "exists: false" for ALL candidates
+                            console.warn(`[PROXY] Number ${number} (and variants) not found on WhatsApp.`);
+                            return res.status(400).json({ error: 'Número não encontrado no WhatsApp/Evolution API.' });
+                        }
+                    }
+                }
+            }
+        } catch (checkErr) {
+            console.warn('[PROXY] Normalization/DB check failed, using input:', checkErr);
+            return res.status(500).json({ error: 'Falha ao verificar número no WhatsApp.' });
+        }
+
+        // Final Safety: If API check failed/skipped but we are here (DB found?), ensure consistency one last time
+        // If we are about to save a 9-digit BR number as JID, strip it.
+        if (remoteJid && remoteJid.includes('@s.whatsapp.net')) {
+            let numPart = remoteJid.split('@')[0];
+            if (isBrazilMobile(numPart)) {
+                remoteJid = `${to8Digits(numPart)}@s.whatsapp.net`;
+                console.log(`[PROXY] Forced 8-digit JID safety check: ${remoteJid}`);
+            }
+        }
+
+        const id = 'SENT-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(7).toUpperCase();
+
+        // 3. Optimistic Persistence (Save using NORMALIZED Jid)
+        // Note: 'from_me' is always true here.
+        await db.query(`
+            INSERT INTO messages (id, remote_jid, instance_name, from_me, content, message_type, created_at)
+            VALUES ($1, $2, $3, $4, $5, 'conversation', NOW() AT TIME ZONE 'America/Sao_Paulo')
+        `, [id, remoteJid, instanceName, true, text]);
+
+        await db.query(`
+            INSERT INTO contacts (remote_jid, instance_name, last_message_content, last_message_from_me, last_message_created_at)
+            VALUES ($1, $2, $3, $4, NOW() AT TIME ZONE 'America/Sao_Paulo')
+            ON CONFLICT (remote_jid, instance_name)
+            DO UPDATE SET
+                last_message_content = EXCLUDED.last_message_content,
+                last_message_from_me = EXCLUDED.last_message_from_me,
+                last_message_created_at = EXCLUDED.last_message_created_at,
+                updated_at = NOW() AT TIME ZONE 'America/Sao_Paulo'
+        `, [remoteJid, instanceName, text, true]);
+
+        console.log(`[PROXY] Optimistically saved message ${id} to ${remoteJid}`);
+
+        // 4. Forward to Evolution API
+        // Use Fetch to call the external API
+        const response = await fetch(`${base_url}/message/sendText/${instanceName}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'apikey': api_key },
+            body: JSON.stringify({ number: numberToSend, text, delay: delay || 1200 })
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            console.error(`Evolution API Error: ${errText}`);
+            // We return error but the message IS saved. 
+            // Ideally we should mark it as failed in DB, but for now let's just warn user.
+            return res.status(response.status).json({ error: 'Evolution API failed', details: errText });
+        }
+
+        const data = await response.json();
+        console.log(`[PROXY] Evolution confirmed send for ${id}`);
+        res.json(data);
+
+    } catch (err) {
+        console.error('Proxy Send Error:', err);
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
