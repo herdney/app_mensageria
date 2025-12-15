@@ -1,3 +1,4 @@
+analise esse código. Ele vai funcionar apenas para instância "Herd"
 const { Client } = require('pg');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
@@ -14,14 +15,16 @@ async function enableEvents() {
     try {
         await client.connect();
 
-        const { rows } = await client.query("SELECT base_url, api_key, webhook_url FROM evolution_hosts WHERE name = $1");
+        const { rows } = await client.query("SELECT base_url, api_key, webhook_url FROM evolution_hosts WHERE name = 'Herd'");
         if (rows.length === 0) {
             return;
         }
         const { base_url, api_key, webhook_url } = rows[0];
+
+        console.log(`Updating Webhook for Herd at ${base_url}...`);
         console.log(`URL: ${webhook_url}`);
 
-        const response = await fetch(`${base_url}/webhook/set/INSTANCE_NAME`, {
+        const response = await fetch(`${base_url}/webhook/set/Herd`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
