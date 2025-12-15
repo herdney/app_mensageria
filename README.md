@@ -95,7 +95,7 @@ Acesse `http://localhost:5173` no seu navegador.
 
 ## 🐳 Deploy com Docker Swarm (Stack)
 
-Para rodar o projeto em produção usando Docker Swarm ou Docker Compose, utilize a stack abaixo. Certifique-se de que o serviço do PostgreSQL esteja acessível na mesma rede ou ajuste a variável `DB_HOST`.
+Para rodar o projeto em produção usando Docker Swarm, utilize a stack abaixo. Certifique-se de que o serviço do PostgreSQL esteja acessível na mesma rede ou ajuste a variável `DB_HOST`.
 
 1. Crie um arquivo `docker-stack.yml`:
 
@@ -108,13 +108,13 @@ services:
     environment:
       - PORT=3001
       - DB_HOST=postgres # Nome do serviço do banco na rede
-      - DB_PORT=5432
+      - DB_PORT=porta_seu_banco
       - DB_USER=postgres
       - DB_PASSWORD=sua_senha_do_banco
       - DB_NAME=mensageria
       - OPENAI_API_KEY=sk-... # Sua chave da OpenAI
     networks:
-      - cmh # Rede onde o banco e o Traefik estão rodando
+      - sua_rede # Rede onde o banco e o Traefik estão rodando
     deploy:
       mode: replicated
       replicas: 1
@@ -128,7 +128,7 @@ services:
         - "traefik.http.services.mensageria.loadbalancer.server.port=3001"
 
 networks:
-  cmh:
+  sua_rede:
     external: true
 ```
 
