@@ -98,24 +98,20 @@ export function ContactsView({ instances = [], selectedInstance, onSelectInstanc
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
 
-            setMessages(prev => {
-              // 1. Check strict duplicate (ID match)
-              if (prev.some(m => m.id === newMessage.id)) return prev;
+            setMessages((prev) => {
+              // 1) duplicado por ID
+              if (prev.some((m) => m.id === newMessage.id)) return prev;
 
-              // 2. Check optimistic duplicate (Text + Sender match for temp IDs)
-              // Only matching the last few messages to be safe/performant, but finding anywhere is fine for this scale
+              // 2) substituir otimista (temp-)
               if (newMessage.sender === "user") {
-                const optimisticMatchIndex = prev.findIndex(m =>
-                  m.sender === "user" &&
-                  m.text === newMessage.text &&
-                  m.id.startsWith("temp-")
+                const optimisticMatchIndex = prev.findIndex(
+                  (m) => m.sender === "user" && m.text === newMessage.text && m.id.startsWith("temp-")
                 );
 
                 if (optimisticMatchIndex !== -1) {
-                  // Replace optimistic with real
-                  const newHistory = [...prev];
-                  newHistory[optimisticMatchIndex] = newMessage;
-                  return newHistory;
+                  const next = [...prev];
+                  next[optimisticMatchIndex] = newMessage;
+                  return next;
                 }
               }
 

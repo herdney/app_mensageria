@@ -1,21 +1,32 @@
-import { io } from 'socket.io-client';
+// src/services/socket.ts
+import { io, Socket } from "socket.io-client";
 
-// Connect to the local backend server (which relays Evolution API events)
-export const socket = io({
-    autoConnect: false, // We will connect manually when the app is ready/user is logged in
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
+
+export const socket: Socket = io(SOCKET_URL, {
+    path: "/socket.io",
+    autoConnect: false,
+    transports: ["websocket", "polling"],
     reconnection: true,
 });
 
-export const connectSocket = () => {
-    if (!socket.connected) {
-        socket.connect();
-        console.log("Socket connecting...");
-    }
-};
+export function connectSocket() {
+    if (!socket.connected) socket.connect();
+    return socket;
+}
 
-export const disconnectSocket = () => {
-    if (socket.connected) {
-        socket.disconnect();
-        console.log("Socket disconnected");
-    }
-};
+export function disconnectSocket() {
+    if (socket.connected) socket.disconnect();
+}
+
+socket.on("connect", () => {
+    console.log("[socket] connected:", socket.id, "->", SOCKET_URL);
+});
+
+socket.on("disconnect", (reason) => {
+    console.log("[socket] disconnected:", reason);
+});
+
+socket.on("connect_error", (err) => {
+    console.error("[socket] connect_error:", err.message);
+});

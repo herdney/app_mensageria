@@ -196,7 +196,7 @@ export function ConnectionView({
         // Assume instance might already exist, try to fetch it
         console.warn("Create failed, checking if exists...", e);
         const instances = await apiService.fetchInstances();
-        const exists = instances.find((i: any) => i.instance.instanceName === instanceName);
+        const exists = instances.find((i: any) => i.instance?.instanceName === instanceName);
         if (exists) {
           data = exists; // Use existing instance data structure if somewhat compatible
           toast.info("Instância já existe, tentando conectar...");

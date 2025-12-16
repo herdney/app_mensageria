@@ -1,712 +1,939 @@
-const express = require('express');
-const cors = require('cors');
-const http = require('http');
-const { Server } = require('socket.io');
-const db = require('./db');
-const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-const OpenAI = require('openai');
+const express = require("express");
+const cors = require("cors");
+const http = require("http");
+const { Server } = require("socket.io");
+const path = require("path");
+const fs = require("fs");
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+require("dotenv").config({ path: path.join(__dirname, ".env") });
 
+const db = require("./db");
+const OpenAI = require("openai");
+
+const fetchFn =
+    global.fetch ||
+    ((...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args)));
+
+function nowSP() {
+    return "NOW() AT TIME ZONE 'America/Sao_Paulo'";
+}
+
+function normalizeBaseUrl(url) {
+    return String(url || "").replace(/\/+$/, "");
+}
+
+function isGroupJid(remoteJid) {
+    return !!remoteJid && remoteJid.includes("@g.us");
+}
+
+function safeString(v, max = 5000) {
+    const s = (v ?? "").toString();
+    return s.length > max ? s.slice(0, max) : s;
+}
+
+// -----------------------------
+// Normalização BR (remove 9º dígito)
+// -----------------------------
+function isBrazilMobile9(num) {
+    return typeof num === "string" && num.length === 13 && num.startsWith("55") && num[4] === "9";
+}
+function toBrazil8Digits(num) {
+    return isBrazilMobile9(num) ? num.substring(0, 4) + num.substring(5) : num;
+}
+function jidFromNumber(num) {
+    return `${num}@s.whatsapp.net`;
+}
+function canonicalizeRemoteJid(remoteJid) {
+    if (!remoteJid) return remoteJid;
+    if (!remoteJid.includes("@s.whatsapp.net")) return remoteJid;
+    const num = remoteJid.split("@")[0];
+    if (isBrazilMobile9(num)) return jidFromNumber(toBrazil8Digits(num));
+    return remoteJid;
+}
+
+// -----------------------------
+// OpenAI
+// -----------------------------
+const hasGlobalOpenAI = !!process.env.OPENAI_API_KEY;
+const openaiGlobal = hasGlobalOpenAI ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+// -----------------------------
+// App + Socket.io
+// -----------------------------
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "*", // Allow all origins for local dev
-        methods: ["GET", "POST"]
-    }
+    cors: { origin: "*", methods: ["GET", "POST", "PUT", "DELETE"] },
 });
-
-const port = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' })); // Evolution API sends JSON webhooks by default
+app.use(express.json({ limit: "50mb" }));
+app.set("io", io);
 
-// Access global IO instance if needed
-app.set('io', io);
+const port = Number(process.env.PORT || 3001);
 
-// Socket.io Connection
-io.on('connection', (socket) => {
-    console.log('User connected:', socket.id);
+io.on("connection", (socket) => {
+    console.log("User connected:", socket.id);
+    socket.on("disconnect", () => console.log("User disconnected:", socket.id));
+});
 
-    socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
+// -----------------------------
+// DB
+// -----------------------------
+async function getHostByName(instanceName) {
+    const { rows } = await db.query(
+        `SELECT id, name, base_url, api_key, webhook_url, status, owner_jid, profile_pic_url
+     FROM evolution_hosts WHERE name = $1 LIMIT 1`,
+        [instanceName]
+    );
+    return rows[0] || null;
+}
+
+async function getHostCreds(instanceName) {
+    const host = await getHostByName(instanceName);
+    if (!host) return null;
+    return { base_url: host.base_url, api_key: host.api_key, webhook_url: host.webhook_url, name: host.name };
+}
+
+function buildWebhookUrl(rawWebhookUrl, instanceName) {
+    const base = String(rawWebhookUrl || "").trim();
+    if (!base) return "";
+
+    const noTrail = base.replace(/\/+$/, "");
+
+    if (noTrail.includes("{instanceName}")) return noTrail.replaceAll("{instanceName}", encodeURIComponent(instanceName));
+    if (noTrail.match(/\/webhook\/[^/]+$/)) return noTrail; // já tem /webhook/:inst
+
+    if (noTrail.endsWith("/webhook")) return `${noTrail}/${encodeURIComponent(instanceName)}`;
+
+    if (!noTrail.includes("/webhook")) return `${noTrail}/webhook/${encodeURIComponent(instanceName)}`;
+
+    return `${noTrail}/${encodeURIComponent(instanceName)}`;
+}
+
+// -----------------------------
+// Evolution API
+// -----------------------------
+async function evolutionPost({ base_url, api_key }, pathUrl, body) {
+    const url = `${normalizeBaseUrl(base_url)}${pathUrl}`;
+    const res = await fetchFn(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: api_key },
+        body: body ? JSON.stringify(body) : "{}",
     });
-});
 
-// WEBHOOK Endpoint - Receiving events from Evolution API
-app.post(['/webhook', '/webhook/*'], async (req, res) => {
+    const text = await res.text();
+    let data = null;
     try {
-        let events = req.body;
+        data = text ? JSON.parse(text) : null;
+    } catch {
+        data = { raw: text };
+    }
 
-        const fs = require('fs');
-        fs.appendFileSync('webhook_debug.log', JSON.stringify(events, null, 2) + '\n---\n');
-        console.log('Raw Webhook Body:', JSON.stringify(events, null, 2).substring(0, 500));
+    if (!res.ok) {
+        const msg = data?.message || data?.error || `HTTP ${res.status} ${res.statusText}`;
+        const err = new Error(msg);
+        err.status = res.status;
+        err.details = data;
+        throw err;
+    }
 
-        // Normalize to array to handle single or batch events
-        if (!Array.isArray(events)) {
-            events = [events];
-        }
+    return data;
+}
 
-        for (const event of events) {
-            if (!event) continue;
+const DEFAULT_WEBHOOK_EVENTS = [
+    "APPLICATION_STARTUP",
+    "QRCODE_UPDATED",
+    "MESSAGES_SET",
+    "MESSAGES_UPSERT",
+    "MESSAGES_UPDATE",
+    "MESSAGES_DELETE",
+    "SEND_MESSAGE",
+    "CONTACTS_SET",
+    "CONTACTS_UPSERT",
+    "CONTACTS_UPDATE",
+    "PRESENCE_UPDATE",
+    "CHATS_SET",
+    "CHATS_UPSERT",
+    "CHATS_UPDATE",
+    "CHATS_DELETE",
+    "GROUPS_UPSERT",
+    "GROUP_UPDATE",
+    "GROUP_PARTICIPANTS_UPDATE",
+    "CONNECTION_UPDATE",
+    "LABELS_EDIT",
+    "LABELS_ASSOCIATION",
+    "CALL",
+    "TYPEBOT_START",
+    "TYPEBOT_CHANGE_STATUS",
+];
 
-            const type = event.type || event.event; // e.g., 'messages.upsert'
-            console.log('Processing Webhook Event:', type);
+// Formato EXATO do set webhook
+async function setEvolutionWebhookForInstance(instanceName, events = DEFAULT_WEBHOOK_EVENTS, extraHeaders = {}) {
+    const host = await getHostByName(instanceName);
+    if (!host || !host.base_url || !host.api_key || !host.webhook_url) return null;
 
-            // --- REAL TIME NOTIFICATION LOGIC ---
-            // Emit to all connected clients (React Frontend)
-            io.emit('evolution_event', event);
+    const creds = { base_url: host.base_url, api_key: host.api_key };
+    const finalUrl = buildWebhookUrl(host.webhook_url, instanceName);
 
-            // --- SAVE MESSAGE LOGIC (RESTORED) ---
-            const eventType = type ? type.toLowerCase() : "";
+    return evolutionPost(creds, `/webhook/set/${encodeURIComponent(instanceName)}`, {
+        webhook: {
+            enabled: true,
+            url: finalUrl,
+            headers: extraHeaders,
+            byEvents: false,
+            base64: false,
+            events,
+        },
+    });
+}
 
-            if (eventType === 'messages.upsert' || eventType === 'send.message') {
-                const data = event.data;
-                // Handle variation: data might be the message itself or contain a messages array
-                let messages = [];
-                if (Array.isArray(data)) {
-                    messages = data;
-                } else if (data.messages) {
-                    messages = data.messages;
-                } else if (data.key) {
-                    // Data IS the message object (User's specific case)
-                    messages = [data];
-                }
+// -----------------------------
+// Webhook parser
+// -----------------------------
+function normalizeEventType(rawType) {
+    const raw = String(rawType || "").trim();
+    return raw.toLowerCase().replace(/_/g, ".");
+}
 
-                console.log(`Processing ${messages.length} messages for DB...`);
+function extractMessagesFromWebhookEvent(event) {
+    const type = normalizeEventType(event?.type || event?.event);
 
-                for (const msg of messages) {
-                    if (!msg.key) continue;
+    const data = event?.data;
+    let messages = [];
 
-                    const id = msg.key.id;
-                    const remoteJid = msg.key.remoteJid;
+    if (Array.isArray(data)) messages = data;
+    else if (data?.messages && Array.isArray(data.messages)) messages = data.messages;
+    else if (data?.key) messages = [data];
+    else if (event?.key) messages = [event];
 
-                    // User Request: Ignore group messages
-                    if (remoteJid && remoteJid.includes('@g.us')) {
-                        console.log(`Ignoring group message: ${remoteJid}`);
-                        continue;
-                    }
-                    const fromMe = msg.key.fromMe || false;
-                    const instanceName = event.instance || 'default';
-                    // User Request: push_name only if from_me is false
-                    const pushName = !fromMe ? (msg.pushName || null) : null;
+    return { type, messages };
+}
 
-                    // Extract content
-                    let content = "";
-                    let messageType = "unknown";
+function extractContentAndType(msg) {
+    let content = "";
+    let messageType = "unknown";
+    let mediaUrl = null;
 
-                    if (msg.message) {
-                        if (msg.message.conversation) {
-                            content = msg.message.conversation;
-                            messageType = "conversation";
-                        } else if (msg.message.extendedTextMessage?.text) {
-                            content = msg.message.extendedTextMessage.text;
-                            messageType = "extendedTextMessage";
-                        } else if (msg.message.imageMessage) {
-                            content = msg.message.imageMessage.caption || "[Imagem]";
-                            messageType = "imageMessage";
-                        } else {
-                            content = JSON.stringify(msg.message).substring(0, 100); // Fallback
-                            messageType = Object.keys(msg.message)[0] || "unknown";
-                        }
-                    }
+    const m = msg?.message;
+    if (!m) return { content: "", messageType: "unknown", mediaUrl: null };
 
-                    try {
-                        // User Request: created_at with 'America/Sao_Paulo' timezone
-                        await db.query(
-                            `INSERT INTO messages 
-                            (id, remote_jid, instance_name, from_me, content, message_type, push_name, created_at)
-                            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW() AT TIME ZONE 'America/Sao_Paulo')
-                            ON CONFLICT (id) DO NOTHING`,
-                            [id, remoteJid, instanceName, fromMe, content, messageType, pushName]
-                        );
-                        console.log(`Saved message ${id} to DB.`);
+    if (m.conversation) {
+        content = m.conversation;
+        messageType = "conversation";
+    } else if (m.extendedTextMessage?.text) {
+        content = m.extendedTextMessage.text;
+        messageType = "extendedTextMessage";
+    } else if (m.imageMessage) {
+        content = m.imageMessage.caption || "[Imagem]";
+        messageType = "imageMessage";
+        mediaUrl = m.imageMessage.url || null;
+    } else if (m.videoMessage) {
+        content = m.videoMessage.caption || "[Vídeo]";
+        messageType = "videoMessage";
+        mediaUrl = m.videoMessage.url || null;
+    } else if (m.documentMessage) {
+        content = m.documentMessage.fileName || "[Documento]";
+        messageType = "documentMessage";
+        mediaUrl = m.documentMessage.url || null;
+    } else {
+        const key = Object.keys(m)[0] || "unknown";
+        messageType = key;
+        content = safeString(JSON.stringify(m), 200);
+    }
 
-                        // --- UPSERT Contact Logic ---
-                        if (!fromMe) {
-                            await db.query(`
-                                INSERT INTO contacts (remote_jid, instance_name, push_name, last_message_content, last_message_from_me, last_message_created_at)
-                                VALUES ($1, $2, $3, $4, $5, NOW() AT TIME ZONE 'America/Sao_Paulo')
-                                ON CONFLICT (remote_jid, instance_name) 
-                                DO UPDATE SET 
-                                    push_name = COALESCE(EXCLUDED.push_name, contacts.push_name), 
-                                    last_message_content = EXCLUDED.last_message_content,
-                                    last_message_from_me = EXCLUDED.last_message_from_me,
-                                    last_message_created_at = EXCLUDED.last_message_created_at,
-                                    updated_at = NOW() AT TIME ZONE 'America/Sao_Paulo'
-                             `, [remoteJid, instanceName, pushName, content, fromMe]);
+    return { content: safeString(content, 5000), messageType, mediaUrl };
+}
 
-                            // Trigger enrichment (profile pic, business status)
-                            enrichContactData(instanceName, remoteJid);
+// -----------------------------
+// Enriquecimento contato
+// -----------------------------
+async function enrichContactData(instanceName, remoteJid) {
+    if (!remoteJid || isGroupJid(remoteJid)) return;
 
-                            // Trigger Agent Auto-Reply
-                            handleAgentAutoReply(instanceName, remoteJid, content, pushName);
-                        } else {
-                            // Update last message for sent items
-                            await db.query(`
-                                INSERT INTO contacts (remote_jid, instance_name, last_message_content, last_message_from_me, last_message_created_at)
-                                VALUES ($1, $2, $3, $4, NOW() AT TIME ZONE 'America/Sao_Paulo')
-                                ON CONFLICT (remote_jid, instance_name) 
-                                DO UPDATE SET 
-                                    last_message_content = EXCLUDED.last_message_content,
-                                    last_message_from_me = EXCLUDED.last_message_from_me,
-                                    last_message_created_at = EXCLUDED.last_message_created_at,
-                                    updated_at = NOW() AT TIME ZONE 'America/Sao_Paulo'
-                             `, [remoteJid, instanceName, content, fromMe]);
+    try {
+        const creds = await getHostCreds(instanceName);
+        if (!creds) return;
 
-                            // Trigger enrichment even for outgoing messages to catch the contact's name!
-                            enrichContactData(instanceName, remoteJid);
-                        }
-                    } catch (dbErr) {
-                        console.error('Failed to save message:', dbErr);
-                    }
-                }
+        const { base_url, api_key } = creds;
+        const number = remoteJid.split("@")[0];
+
+        let profilePicUrl = null;
+        let profileName = null;
+
+        try {
+            const profile = await evolutionPost(
+                { base_url, api_key },
+                `/chat/fetchProfile/${encodeURIComponent(instanceName)}`,
+                { number }
+            );
+            profilePicUrl = profile?.picture || null;
+            profileName = profile?.name || null;
+        } catch { }
+
+        let isBusiness = false;
+        let numberExists = true;
+
+        try {
+            const status = await evolutionPost(
+                { base_url, api_key },
+                `/chat/whatsappNumber/${encodeURIComponent(instanceName)}`,
+                { numbers: [number] }
+            );
+
+            if (Array.isArray(status) && status.length > 0) {
+                const info = status[0];
+                if (typeof info.exists === "boolean") numberExists = info.exists;
+                if (typeof info.isBusiness === "boolean") isBusiness = info.isBusiness;
             }
+        } catch { }
+
+        await db.query(
+            `
+      UPDATE contacts
+      SET profile_pic_url = COALESCE($1, profile_pic_url),
+          push_name = COALESCE($2, push_name),
+          is_business = $3,
+          number_exists = $4,
+          updated_at = ${nowSP()}
+      WHERE remote_jid = $5 AND instance_name = $6
+      `,
+            [profilePicUrl, profileName, isBusiness, numberExists, remoteJid, instanceName]
+        );
+
+        if (profileName) {
+            await db.query(
+                `UPDATE messages SET push_name = $1 WHERE remote_jid = $2 AND instance_name = $3`,
+                [profileName, remoteJid, instanceName]
+            );
         }
 
-        res.status(200).send('OK');
-    } catch (e) {
-        console.error('Webhook error:', e);
-        // If headers already sent (rare but possible if multiple res.sends), ignore
-        if (!res.headersSent) res.status(500).send('Error');
+        io.emit("contact_update", {
+            instance: instanceName,
+            remoteJid,
+            pushName: profileName,
+            profilePicUrl,
+            isBusiness,
+            numberExists,
+        });
+    } catch (err) {
+        console.error(`Enrichment failed for ${remoteJid} (${instanceName}):`, err.message);
     }
-});
+}
 
-// Endpoint to clear database and notify clients
-app.post('/database/clear', async (req, res) => {
+// -----------------------------
+// Agente responde
+// -----------------------------
+async function handleAgentAutoReply(instanceName, remoteJid, content, senderName) {
     try {
-        console.log('Clearing database via API request...');
-        await db.query('TRUNCATE TABLE messages, contacts CASCADE');
+        const { rows: agents } = await db.query(
+            `SELECT * FROM agents WHERE is_active = true AND auto_reply = true ORDER BY created_at DESC`
+        );
+        if (!agents.length) return;
 
-        io.emit('database_cleared'); // Notify all clients
-        console.log('Database cleared and event emitted.');
+        const agent = agents[0];
 
-        res.json({ success: true, message: 'Database cleared' });
-    } catch (error) {
-        console.error('Error clearing database:', error);
-        res.status(500).json({ error: 'Failed to clear database' });
+        if (Array.isArray(agent.keywords) && agent.keywords.length > 0) {
+            const text = (content || "").toLowerCase();
+            const ok = agent.keywords.some((k) => text.includes(String(k).toLowerCase()));
+            if (!ok) return;
+        }
+
+        const apiKey = agent.api_key || process.env.OPENAI_API_KEY;
+        if (!apiKey) return;
+
+        const client = agent.api_key ? new OpenAI({ apiKey: agent.api_key }) : openaiGlobal;
+        if (!client) return;
+
+        const maxContext = Number(agent.max_context || 10);
+        const { rows: history } = await db.query(
+            `SELECT from_me, content
+       FROM messages
+       WHERE remote_jid = $1 AND instance_name = $2
+       ORDER BY created_at DESC
+       LIMIT $3`,
+            [remoteJid, instanceName, maxContext]
+        );
+
+        const conversationHistory = history
+            .slice()
+            .reverse()
+            .map((m) => ({
+                role: m.from_me ? "assistant" : "user",
+                content: m.content || "",
+            }));
+
+        const systemPrompt = String(agent.prompt || "")
+            .replace("{name}", senderName || "Cliente")
+            .replace("{now}", new Date().toLocaleString("pt-BR"));
+
+        const completion = await client.chat.completions.create({
+            model: agent.model || "gpt-3.5-turbo",
+            messages: [{ role: "system", content: systemPrompt }, ...conversationHistory],
+            temperature: Number(agent.temperature ?? 0.7),
+        });
+
+        const replyText = completion?.choices?.[0]?.message?.content;
+        if (!replyText) return;
+
+        const creds = await getHostCreds(instanceName);
+        if (!creds) return;
+
+        const number = remoteJid.split("@")[0];
+
+        setTimeout(async () => {
+            try {
+                await evolutionPost(
+                    { base_url: creds.base_url, api_key: creds.api_key },
+                    `/message/sendText/${encodeURIComponent(instanceName)}`,
+                    { number, text: replyText }
+                );
+            } catch (e) {
+                console.error("Agent send failed:", e.message);
+            }
+        }, 1200);
+    } catch (e) {
+        console.error("Agent Auto-Reply Error:", e.message);
+    }
+}
+
+async function processWebhookEvents(instanceName, body, res) {
+    const host = await getHostByName(instanceName);
+    if (!host) return res.status(404).json({ error: `Unknown instanceName: ${instanceName}` });
+
+    let events = body;
+
+    if (process.env.WEBHOOK_DEBUG === "1") {
+        try {
+            fs.appendFileSync("webhook_debug.log", JSON.stringify(events, null, 2) + "\n---\n");
+        } catch { }
+    }
+
+    if (!Array.isArray(events)) events = [events];
+
+    for (const event of events) {
+        if (!event) continue;
+
+        io.emit("evolution_event", { ...event, instance: instanceName });
+
+        const { type, messages } = extractMessagesFromWebhookEvent(event);
+
+        if (type !== "messages.upsert" && type !== "send.message") continue;
+
+        for (const msg of messages) {
+            if (!msg?.key) continue;
+
+            const id = msg.key.id;
+            let remoteJid = msg.key.remoteJid;
+
+            if (!remoteJid || isGroupJid(remoteJid)) continue;
+
+            // normaliza BR (9º dígito)
+            remoteJid = canonicalizeRemoteJid(remoteJid);
+
+            const fromMe = !!msg.key.fromMe;
+            const pushName = !fromMe ? (msg.pushName || null) : null;
+
+            const { content, messageType, mediaUrl } = extractContentAndType(msg);
+
+            await db.query(
+                `
+        INSERT INTO messages
+          (id, remote_jid, instance_name, from_me, content, media_url, message_type, push_name, created_at)
+        VALUES
+          ($1,$2,$3,$4,$5,$6,$7,$8, ${nowSP()})
+        ON CONFLICT (id) DO NOTHING
+        `,
+                [id, remoteJid, instanceName, fromMe, content, mediaUrl, messageType, pushName]
+            );
+
+            await db.query(
+                `
+        INSERT INTO contacts
+          (remote_jid, instance_name, push_name, last_message_content, last_message_from_me, last_message_created_at)
+        VALUES
+          ($1,$2,$3,$4,$5, ${nowSP()})
+        ON CONFLICT (remote_jid, instance_name)
+        DO UPDATE SET
+          push_name = COALESCE(EXCLUDED.push_name, contacts.push_name),
+          last_message_content = EXCLUDED.last_message_content,
+          last_message_from_me = EXCLUDED.last_message_from_me,
+          last_message_created_at = EXCLUDED.last_message_created_at,
+          updated_at = ${nowSP()}
+        `,
+                [remoteJid, instanceName, pushName, content, fromMe]
+            );
+
+            enrichContactData(instanceName, remoteJid);
+            if (!fromMe) handleAgentAutoReply(instanceName, remoteJid, content, pushName);
+        }
+    }
+
+    return res.status(200).send("OK");
+}
+
+// -----------------------------
+// ROTAS WEBHOOK
+// -----------------------------
+app.post("/webhook/:instanceName", async (req, res) => {
+    try {
+        return await processWebhookEvents(req.params.instanceName, req.body, res);
+    } catch (e) {
+        console.error("Webhook error:", e);
+        if (!res.headersSent) res.status(500).send("Error");
     }
 });
 
-// GET /contacts/:instanceName - List unique contacts from DB
-app.get('/contacts/:instanceName', async (req, res) => {
+function inferInstanceNameFromBody(body) {
+    const arr = Array.isArray(body) ? body : [body];
+    for (const ev of arr) {
+        if (!ev) continue;
+        const cand =
+            ev.instance ||
+            ev.instanceName ||
+            ev?.data?.instance ||
+            ev?.data?.instanceName ||
+            ev?.webhook?.instance;
+        if (cand) return String(cand);
+    }
+    return null;
+}
+
+app.post("/webhook", async (req, res) => {
+    try {
+        const instanceName =
+            (req.query.instanceName ? String(req.query.instanceName) : null) ||
+            inferInstanceNameFromBody(req.body);
+
+        if (!instanceName) {
+            return res.status(400).json({
+                error:
+                    "Não foi possível identificar a instance. Configure a Evolution para chamar /webhook/:instanceName OU envie `instance` no body.",
+            });
+        }
+
+        return await processWebhookEvents(instanceName, req.body, res);
+    } catch (e) {
+        console.error("Webhook error:", e);
+        if (!res.headersSent) res.status(500).send("Error");
+    }
+});
+
+// -----------------------------
+// LIMPAR BANCO DE DADOS
+// -----------------------------
+app.post("/database/clear", async (req, res) => {
+    try {
+        await db.query("TRUNCATE TABLE messages, contacts CASCADE");
+        io.emit("database_cleared");
+        res.json({ success: true, message: "Database cleared" });
+    } catch (error) {
+        console.error("Error clearing database:", error);
+        res.status(500).json({ error: "Failed to clear database" });
+    }
+});
+
+// -----------------------------
+// CONTATOS / MENSAGENS
+// -----------------------------
+app.get("/contacts/:instanceName", async (req, res) => {
     const { instanceName } = req.params;
     try {
-        const query = `
-            SELECT * FROM contacts 
-            WHERE instance_name = $1 
-            ORDER BY last_message_created_at DESC NULLS LAST
-        `;
-        const { rows } = await db.query(query, [instanceName]);
+        const { rows } = await db.query(
+            `
+      SELECT *
+      FROM contacts
+      WHERE instance_name = $1
+      ORDER BY last_message_created_at DESC NULLS LAST
+      `,
+            [instanceName]
+        );
         res.json(rows);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to fetch contacts' });
+        res.status(500).json({ error: "Failed to fetch contacts" });
     }
 });
 
-// GET /messages/:instanceName/:remoteJid - Get history
-app.get('/messages/:instanceName/:remoteJid', async (req, res) => {
+app.get("/messages/:instanceName/:remoteJid", async (req, res) => {
     const { instanceName, remoteJid } = req.params;
-    const limit = parseInt(req.query.limit) || 50;
+    const limit = Number.parseInt(req.query.limit, 10) || 50;
 
     try {
         const { rows } = await db.query(
-            `SELECT * FROM messages 
-             WHERE instance_name = $1 AND remote_jid = $2 
-             ORDER BY created_at DESC 
-             LIMIT $3`,
+            `
+      SELECT *
+      FROM messages
+      WHERE instance_name = $1 AND remote_jid = $2
+      ORDER BY created_at DESC
+      LIMIT $3
+      `,
             [instanceName, remoteJid, limit]
         );
         res.json(rows);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to fetch messages' });
+        res.status(500).json({ error: "Failed to fetch messages" });
     }
 });
 
-// GET /hosts - List all saved Evolution API hosts
-app.get('/hosts', async (req, res) => {
+// -----------------------------
+// INSTANCIAS
+// -----------------------------
+app.get("/hosts", async (req, res) => {
     try {
-        const { rows } = await db.query('SELECT * FROM evolution_hosts ORDER BY created_at DESC');
+        const { rows } = await db.query("SELECT * FROM evolution_hosts ORDER BY created_at DESC");
         res.json(rows);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: "Internal server error" });
     }
 });
 
-// POST /hosts - Save a new host
-app.post('/hosts', async (req, res) => {
-    const { name, base_url, api_key, webhook_url } = req.body;
-    if (!base_url || !api_key) {
-        return res.status(400).json({ error: 'Base URL and API Key are required' });
+app.post("/hosts", async (req, res) => {
+    const { name, base_url, api_key, webhook_url, status, owner_jid, profile_pic_url } = req.body;
+
+    if (!name || !base_url || !api_key) {
+        return res.status(400).json({ error: "name, base_url and api_key are required" });
     }
+
     try {
         const { rows } = await db.query(
-            'INSERT INTO evolution_hosts (name, base_url, api_key, status, owner_jid, profile_pic_url, webhook_url) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
-            [name || 'Untitled', base_url, api_key, req.body.status, req.body.owner_jid, req.body.profile_pic_url, webhook_url || '']
+            `
+      INSERT INTO evolution_hosts
+        (name, base_url, api_key, status, owner_jid, profile_pic_url, webhook_url)
+      VALUES
+        ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING *
+      `,
+            [name, base_url, api_key, status || null, owner_jid || null, profile_pic_url || null, webhook_url || ""]
         );
+
+        // aplica webhook automaticamente (se webhook_url foi informado)
+        if (webhook_url) {
+            setEvolutionWebhookForInstance(name).catch((e) =>
+                console.error(`[hosts] webhook apply failed for ${name}:`, e.message)
+            );
+        }
+
         res.status(201).json(rows[0]);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to save host' });
+        res.status(500).json({ error: "Failed to save host" });
     }
 });
 
-// PUT /hosts/:id - Update a host (e.g. webhook_url)
-app.put('/hosts/:id', async (req, res) => {
+app.put("/hosts/:id", async (req, res) => {
     const { id } = req.params;
-    const { name, base_url, api_key, status, owner_jid, profile_pic_url, webhook_url } = req.body;
+    const { name, base_url, api_key, webhook_url, status, owner_jid, profile_pic_url } = req.body;
 
     try {
         const { rows } = await db.query(
-            `UPDATE evolution_hosts 
-             SET name = COALESCE($1, name),
-                 base_url = COALESCE($2, base_url),
-                 api_key = COALESCE($3, api_key),
-                 status = COALESCE($4, status),
-                 owner_jid = COALESCE($5, owner_jid),
-                 profile_pic_url = COALESCE($6, profile_pic_url),
-                 webhook_url = COALESCE($7, webhook_url)
-             WHERE id = $8
-             RETURNING *`,
-            [name, base_url, api_key, status, owner_jid, profile_pic_url, webhook_url, id]
+            `
+      UPDATE evolution_hosts
+      SET name = COALESCE($1, name),
+          base_url = COALESCE($2, base_url),
+          api_key = COALESCE($3, api_key),
+          webhook_url = COALESCE($4, webhook_url),
+          status = COALESCE($5, status),
+          owner_jid = COALESCE($6, owner_jid),
+          profile_pic_url = COALESCE($7, profile_pic_url)
+      WHERE id = $8
+      RETURNING *
+      `,
+            [name, base_url, api_key, webhook_url, status, owner_jid, profile_pic_url, id]
         );
 
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'Host not found' });
+        if (!rows.length) return res.status(404).json({ error: "Host not found" });
+
+        const updated = rows[0];
+        if (updated.webhook_url && updated.name) {
+            setEvolutionWebhookForInstance(updated.name).catch((e) =>
+                console.error(`[hosts] webhook re-apply failed for ${updated.name}:`, e.message)
+            );
         }
 
-        res.json(rows[0]);
+        res.json(updated);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to update host' });
+        res.status(500).json({ error: "Failed to update host" });
     }
 });
 
-// DELETE /hosts/:id - Delete a host
-app.delete('/hosts/:id', async (req, res) => {
+app.delete("/hosts/:id", async (req, res) => {
     const { id } = req.params;
     try {
-        await db.query('DELETE FROM evolution_hosts WHERE id = $1', [id]);
+        await db.query("DELETE FROM evolution_hosts WHERE id = $1", [id]);
         res.status(204).send();
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to delete host' });
+        res.status(500).json({ error: "Failed to delete host" });
     }
 });
 
-
-
-// Helper to Enrich Contact Data (Profile Pic + Number Status + Name)
-async function enrichContactData(instanceName, remoteJid) {
-    if (!remoteJid || remoteJid.includes('@g.us')) return; // Skip groups
-
+// -----------------------------
+// CRIAR AGENTES
+// -----------------------------
+app.get("/agents", async (req, res) => {
     try {
-        // 1. Get credentials
-        const { rows } = await db.query('SELECT base_url, api_key FROM evolution_hosts WHERE name = $1', [instanceName]);
-        if (rows.length === 0) return;
-        const { base_url, api_key } = rows[0];
-        const number = remoteJid.split('@')[0];
-
-        // 2. Fetch Profile (Picture AND Name)
-        // Note: URL must NOT have spaces
-        const profileRes = await fetch(`${base_url}/chat/fetchProfile/${instanceName}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': api_key },
-            body: JSON.stringify({ number })
-        });
-
-        let profilePicUrl = null;
-        let profileName = null;
-
-        if (profileRes.ok) {
-            const pData = await profileRes.json();
-            profilePicUrl = pData.picture || null;
-            profileName = pData.name || null;
-        }
-
-        // 3. Check Number Status (is_business, number_exists)
-        // Endpoint: /chat/whatsappNumber/:instance
-        const statusRes = await fetch(`${base_url}/chat/whatsappNumber/${instanceName}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': api_key },
-            body: JSON.stringify({ numbers: [number] })
-        });
-
-        let isBusiness = false;
-        let numberExists = true;
-
-        if (statusRes.ok) {
-            const sData = await statusRes.json();
-            // Expected response: array of objects { exists: true, jid: ..., isBusiness: ... }
-            if (Array.isArray(sData) && sData.length > 0) {
-                const info = sData[0];
-                if (info.exists !== undefined) numberExists = info.exists;
-                if (info.isBusiness !== undefined) isBusiness = info.isBusiness; // Check property name (isBusiness vs business)
-            }
-        }
-
-        // 4. Update Database
-        await db.query(`
-            UPDATE contacts 
-            SET profile_pic_url = COALESCE($1, profile_pic_url),
-                push_name = COALESCE($2, push_name), 
-                is_business = $3,
-                number_exists = $4,
-                updated_at = NOW() AT TIME ZONE 'America/Sao_Paulo'
-            WHERE remote_jid = $5 AND instance_name = $6
-        `, [profilePicUrl, profileName, isBusiness, numberExists, remoteJid, instanceName]);
-
-        // Also update messages table for consistency if we found a name
-        if (profileName) {
-            await db.query(`
-                UPDATE messages SET push_name = $1 
-                WHERE remote_jid = $2 AND instance_name = $3
-             `, [profileName, remoteJid, instanceName]);
-        }
-
-        console.log(`Enriched ${number}: Name=${profileName}, Business=${isBusiness}, Pic=${!!profilePicUrl}`);
-
-        // 5. Emit Socket Event for real-time UI update
-        io.emit('contact_update', {
-            instance: instanceName,
-            remoteJid: remoteJid,
-            pushName: profileName,
-            profilePicUrl: profilePicUrl
-        });
-
-    } catch (err) {
-        console.error(`Enrichment failed for ${remoteJid}:`, err.message);
-    }
-}
-
-// --- AGENTS API ---
-
-// GET /agents
-app.get('/agents', async (req, res) => {
-    try {
-        const { rows } = await db.query('SELECT * FROM agents ORDER BY created_at DESC');
+        const { rows } = await db.query("SELECT * FROM agents ORDER BY created_at DESC");
         res.json(rows);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to fetch agents' });
+        res.status(500).json({ error: "Failed to fetch agents" });
     }
 });
 
-// POST /agents
-app.post('/agents', async (req, res) => {
-    const { id, name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key } = req.body;
+app.post("/agents", async (req, res) => {
+    const {
+        id, name, description, prompt, model, temperature,
+        max_context, is_active, auto_reply, working_hours,
+        keywords, languages, api_key
+    } = req.body;
+
+    if (!name || !prompt) return res.status(400).json({ error: "name and prompt are required" });
+
     try {
-        const { rows } = await db.query(`
-            INSERT INTO agents (id, name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-            RETURNING *
-        `, [id || Date.now().toString(), name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key]);
+        const { rows } = await db.query(
+            `
+      INSERT INTO agents
+        (id, name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key)
+      VALUES
+        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      RETURNING *
+      `,
+            [
+                id || Date.now().toString(),
+                name,
+                description || "",
+                prompt,
+                model || "gpt-3.5-turbo",
+                temperature ?? 0.7,
+                max_context ?? 10,
+                is_active ?? true,
+                auto_reply ?? false,
+                working_hours || null,
+                keywords || [],
+                languages || ["pt-BR"],
+                api_key || null,
+            ]
+        );
+
         res.status(201).json(rows[0]);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to create agent' });
+        res.status(500).json({ error: "Failed to create agent" });
     }
 });
 
-// PUT /agents/:id
-app.put('/agents/:id', async (req, res) => {
+app.put("/agents/:id", async (req, res) => {
     const { id } = req.params;
-    const { name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key } = req.body;
+    const {
+        name, description, prompt, model, temperature,
+        max_context, is_active, auto_reply, working_hours,
+        keywords, languages, api_key
+    } = req.body;
+
     try {
-        const { rows } = await db.query(`
-            UPDATE agents SET
-                name = COALESCE($1, name),
-                description = COALESCE($2, description),
-                prompt = COALESCE($3, prompt),
-                model = COALESCE($4, model),
-                temperature = COALESCE($5, temperature),
-                max_context = COALESCE($6, max_context),
-                is_active = COALESCE($7, is_active),
-                auto_reply = COALESCE($8, auto_reply),
-                working_hours = COALESCE($9, working_hours),
-                keywords = COALESCE($10, keywords),
-                languages = COALESCE($11, languages),
-                api_key = COALESCE($12, api_key)
-            WHERE id = $13
-            RETURNING *
-        `, [name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key, id]);
+        const { rows } = await db.query(
+            `
+      UPDATE agents SET
+        name = COALESCE($1, name),
+        description = COALESCE($2, description),
+        prompt = COALESCE($3, prompt),
+        model = COALESCE($4, model),
+        temperature = COALESCE($5, temperature),
+        max_context = COALESCE($6, max_context),
+        is_active = COALESCE($7, is_active),
+        auto_reply = COALESCE($8, auto_reply),
+        working_hours = COALESCE($9, working_hours),
+        keywords = COALESCE($10, keywords),
+        languages = COALESCE($11, languages),
+        api_key = COALESCE($12, api_key)
+      WHERE id = $13
+      RETURNING *
+      `,
+            [name, description, prompt, model, temperature, max_context, is_active, auto_reply, working_hours, keywords, languages, api_key, id]
+        );
+
+        if (!rows.length) return res.status(404).json({ error: "Agent not found" });
         res.json(rows[0]);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to update agent' });
+        res.status(500).json({ error: "Failed to update agent" });
     }
 });
 
-// DELETE /agents/:id
-app.delete('/agents/:id', async (req, res) => {
+app.delete("/agents/:id", async (req, res) => {
     const { id } = req.params;
     try {
-        await db.query('DELETE FROM agents WHERE id = $1', [id]);
+        await db.query("DELETE FROM agents WHERE id = $1", [id]);
         res.status(204).send();
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: 'Failed to delete agent' });
+        res.status(500).json({ error: "Failed to delete agent" });
     }
 });
 
-// --- PROXY MESSAGE SENDING (OPTIMISTIC SAVING) ---
-app.post('/message/sendText', async (req, res) => {
+// -----------------------------
+// sendText (com normalização 9º dígito)
+// -----------------------------
+app.post("/message/sendText", async (req, res) => {
     const { instanceName, number, text, delay } = req.body;
 
     if (!instanceName || !number || !text) {
-        return res.status(400).json({ error: 'Missing required fields' });
+        return res.status(400).json({ error: "Missing required fields" });
     }
 
     try {
-        // 1. Fetch Credentials First
-        const { rows } = await db.query('SELECT base_url, api_key FROM evolution_hosts WHERE name = $1', [instanceName]);
-        if (rows.length === 0) {
-            return res.status(404).json({ error: 'Instance not found' });
-        }
-        const { base_url, api_key } = rows[0];
+        const creds = await getHostCreds(instanceName);
+        if (!creds) return res.status(404).json({ error: "Instance not found" });
 
-        // 2. Validate/Normalize Number
-        // Strategy: 
-        // A. Check if valid contact already exists in OUR DB (Exact or Fuzzy for Brazil)
-        // B. Ask Evolution API (Whatsapp) if the number exists
+        const base_url = creds.base_url;
+        const api_key = creds.api_key;
 
-        let remoteJid = `${number}@s.whatsapp.net`;
-        let numberToSend = number;
-        let finalNumber = number; // The number part of JID
+        // A) Normalização Brasil
+        let numberInput = String(number).replace(/\D/g, "");
+        let remoteJid = jidFromNumber(numberInput);
+        let numberToSend = numberInput;
 
-        // Helper for Brazil 9-digit handling (55 + 2 digits DDD + 9 + 8 digits phone)
-        const isBrazilMobile = (num) => num.length === 13 && num.startsWith('55') && num[4] === '9';
-        const to8Digits = (num) => isBrazilMobile(num) ? (num.substring(0, 4) + num.substring(5)) : num;
-
-        // A. DB Check
+        // 1) tenta achar no DB (número ou variante 8 dígitos)
         try {
-            // Check exact first
-            let dbRes = await db.query('SELECT remote_jid FROM contacts WHERE instance_name = $1 AND (remote_jid LIKE $2 OR remote_jid LIKE $3)',
-                [instanceName, `${number}%`, `${to8Digits(number)}%`]);
+            const eight = toBrazil8Digits(numberInput);
+            const { rows: dbRes } = await db.query(
+                `SELECT remote_jid
+         FROM contacts
+         WHERE instance_name = $1
+           AND (remote_jid LIKE $2 OR remote_jid LIKE $3)
+         LIMIT 1`,
+                [instanceName, `${numberInput}%`, `${eight}%`]
+            );
 
-            if (dbRes.rows.length > 0) {
-                // If found, prefer the existing JID
-                remoteJid = dbRes.rows[0].remote_jid;
-                finalNumber = remoteJid.split('@')[0];
-                numberToSend = finalNumber; // Send to the 'real' number if found
+            if (dbRes.length > 0) {
+                remoteJid = canonicalizeRemoteJid(dbRes[0].remote_jid);
+                numberToSend = remoteJid.split("@")[0];
                 console.log(`[PROXY] Found existing contact in DB: ${remoteJid}`);
             } else {
-                // B. API Check (If not in DB)
-                // Try checking the input number AND the 8-digit version if applicable
-                // CRITICAL: Check 8-digit version FIRST. If it exists, use it. This prevents duplicates where API accepts 9-digit but returns 8-digit webhook.
-                let numbersToCheck = [];
-                if (isBrazilMobile(number)) {
-                    numbersToCheck.push(to8Digits(number)); // Priority 1: 8 Digits (Canonical)
-                    if (number !== to8Digits(number)) numbersToCheck.push(number); // Priority 2: Original
+                // 2) se não achou, valida na Evolution (prioriza 8 dígitos)
+                const numbersToCheck = [];
+                if (isBrazilMobile9(numberInput)) {
+                    const eightCandidate = toBrazil8Digits(numberInput);
+                    numbersToCheck.push(eightCandidate);
+                    if (numberInput !== eightCandidate) numbersToCheck.push(numberInput);
                 } else {
-                    numbersToCheck.push(number);
+                    numbersToCheck.push(numberInput);
                 }
 
-                const checkRes = await fetch(`${base_url}/chat/whatsappNumber/${instanceName}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'apikey': api_key },
-                    body: JSON.stringify({ numbers: numbersToCheck })
-                });
+                const check = await evolutionPost(
+                    { base_url, api_key },
+                    `/chat/whatsappNumber/${encodeURIComponent(instanceName)}`,
+                    { numbers: numbersToCheck }
+                );
 
-                if (checkRes.ok) {
-                    const checkData = await checkRes.json();
-                    if (Array.isArray(checkData)) {
-                        // Find the first one that exists
-                        const found = checkData.find(x => x.exists);
-                        if (found) {
-                            // API confirmed existence.
-                            // However, for DB storage, we MUST FORCE standard 8-digit JID for Brazil to match Webhooks.
-                            // Evolution/WhatsApp often returns 9-digit "exists" but sends events with 8-digit JID.
-                            let confirmedJid = found.jid;
-                            let confirmedNumber = confirmedJid.split('@')[0];
-
-                            numberToSend = confirmedNumber; // Send to what exists
-
-                            if (isBrazilMobile(confirmedNumber)) {
-                                console.log(`[PROXY] Forcing JID to 8 digits for DB consistency: ${confirmedNumber}`);
-                                finalNumber = to8Digits(confirmedNumber);
-                                remoteJid = `${finalNumber}@s.whatsapp.net`;
-                            } else {
-                                remoteJid = confirmedJid;
-                            }
-
-                            console.log(`[PROXY] Normalized ${number} -> Send: ${numberToSend}, DB: ${remoteJid}`);
-
-                        } else {
-                            // STRICT CHECK: If API responded but said "exists: false" for ALL candidates
-                            console.warn(`[PROXY] Number ${number} (and variants) not found on WhatsApp.`);
-                            return res.status(400).json({ error: 'Número não encontrado no WhatsApp/Evolution API.' });
-                        }
+                if (Array.isArray(check)) {
+                    const found = check.find((x) => x && x.exists);
+                    if (!found) {
+                        console.warn(`[PROXY] Number ${numberInput} (and variants) not found on WhatsApp.`);
+                        return res.status(400).json({ error: "Número não encontrado no WhatsApp/Evolution API." });
                     }
+
+                    const confirmedJid = found.jid || jidFromNumber(numbersToCheck[0]);
+                    const confirmedNumber = confirmedJid.split("@")[0];
+
+                    numberToSend = confirmedNumber;
+
+                    // força 8 dígitos no DB se for BR 9
+                    if (isBrazilMobile9(confirmedNumber)) {
+                        remoteJid = jidFromNumber(toBrazil8Digits(confirmedNumber));
+                    } else {
+                        remoteJid = confirmedJid;
+                    }
+
+                    remoteJid = canonicalizeRemoteJid(remoteJid);
+
+                    console.log(`[PROXY] Normalized ${numberInput} -> Send: ${numberToSend}, DB: ${remoteJid}`);
                 }
             }
-        } catch (checkErr) {
-            console.warn('[PROXY] Normalization/DB check failed, using input:', checkErr);
-            return res.status(500).json({ error: 'Falha ao verificar número no WhatsApp.' });
+        } catch (e) {
+            console.warn("[PROXY] Normalization check failed:", e.message);
+            return res.status(500).json({ error: "Falha ao verificar número no WhatsApp." });
         }
 
-        // Final Safety: If API check failed/skipped but we are here (DB found?), ensure consistency one last time
-        // If we are about to save a 9-digit BR number as JID, strip it.
-        if (remoteJid && remoteJid.includes('@s.whatsapp.net')) {
-            let numPart = remoteJid.split('@')[0];
-            if (isBrazilMobile(numPart)) {
-                remoteJid = `${to8Digits(numPart)}@s.whatsapp.net`;
-                console.log(`[PROXY] Forced 8-digit JID safety check: ${remoteJid}`);
-            }
-        }
+        remoteJid = canonicalizeRemoteJid(remoteJid);
 
-        const id = 'SENT-' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).substring(7).toUpperCase();
+        const id =
+            "SENT-" +
+            Date.now().toString(36).toUpperCase() +
+            Math.random().toString(36).slice(2).toUpperCase();
 
-        // 3. Optimistic Persistence (Save using NORMALIZED Jid)
-        // Note: 'from_me' is always true here.
-        await db.query(`
-            INSERT INTO messages (id, remote_jid, instance_name, from_me, content, message_type, created_at)
-            VALUES ($1, $2, $3, $4, $5, 'conversation', NOW() AT TIME ZONE 'America/Sao_Paulo')
-        `, [id, remoteJid, instanceName, true, text]);
+        await db.query(
+            `
+      INSERT INTO messages (id, remote_jid, instance_name, from_me, content, message_type, created_at)
+      VALUES ($1,$2,$3,$4,$5,'conversation', ${nowSP()})
+      ON CONFLICT (id) DO NOTHING
+      `,
+            [id, remoteJid, instanceName, true, safeString(text, 5000)]
+        );
 
-        await db.query(`
-            INSERT INTO contacts (remote_jid, instance_name, last_message_content, last_message_from_me, last_message_created_at)
-            VALUES ($1, $2, $3, $4, NOW() AT TIME ZONE 'America/Sao_Paulo')
-            ON CONFLICT (remote_jid, instance_name)
-            DO UPDATE SET
-                last_message_content = EXCLUDED.last_message_content,
-                last_message_from_me = EXCLUDED.last_message_from_me,
-                last_message_created_at = EXCLUDED.last_message_created_at,
-                updated_at = NOW() AT TIME ZONE 'America/Sao_Paulo'
-        `, [remoteJid, instanceName, text, true]);
+        await db.query(
+            `
+      INSERT INTO contacts (remote_jid, instance_name, last_message_content, last_message_from_me, last_message_created_at)
+      VALUES ($1,$2,$3,$4, ${nowSP()})
+      ON CONFLICT (remote_jid, instance_name)
+      DO UPDATE SET
+        last_message_content = EXCLUDED.last_message_content,
+        last_message_from_me = EXCLUDED.last_message_from_me,
+        last_message_created_at = EXCLUDED.last_message_created_at,
+        updated_at = ${nowSP()}
+      `,
+            [remoteJid, instanceName, safeString(text, 5000), true]
+        );
 
-        console.log(`[PROXY] Optimistically saved message ${id} to ${remoteJid}`);
+        // C) Envia na Evolution
+        const data = await evolutionPost(
+            { base_url, api_key },
+            `/message/sendText/${encodeURIComponent(instanceName)}`,
+            { number: numberToSend, text, delay: delay || 1200 }
+        );
 
-        // 4. Forward to Evolution API
-        // Use Fetch to call the external API
-        const response = await fetch(`${base_url}/message/sendText/${instanceName}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'apikey': api_key },
-            body: JSON.stringify({ number: numberToSend, text, delay: delay || 1200 })
-        });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            console.error(`Evolution API Error: ${errText}`);
-            // We return error but the message IS saved. 
-            // Ideally we should mark it as failed in DB, but for now let's just warn user.
-            return res.status(response.status).json({ error: 'Evolution API failed', details: errText });
-        }
-
-        const data = await response.json();
-        console.log(`[PROXY] Evolution confirmed send for ${id}`);
         res.json(data);
-
     } catch (err) {
-        console.error('Proxy Send Error:', err);
-        res.status(500).json({ error: 'Internal Server Error' });
+        console.error("Proxy Send Error:", err.message);
+        res.status(500).json({ error: "Internal Server Error", details: err.message });
     }
 });
 
-// --- AI AUTO REPLY LOGIC ---
-async function handleAgentAutoReply(instanceName, remoteJid, content, senderName) {
-    try {
-        // 1. Find active agents (Simplified: matches any agent active)
-        const { rows: agents } = await db.query('SELECT * FROM agents WHERE is_active = true AND auto_reply = true');
-        if (agents.length === 0) return;
+// -----------------------------
+// FRONTEND ESTÁTICO (prod/dev)
+// -----------------------------
+const distPath = path.join(__dirname, "../dist");
+const publicPath = path.join(__dirname, "public");
 
-        const agent = agents[0]; // Priority: First one
-
-        // 2. Filter: Keywords
-        if (agent.keywords && agent.keywords.length > 0) {
-            const hasKeyword = agent.keywords.some(k => content.toLowerCase().includes(k.toLowerCase()));
-            if (!hasKeyword) return;
-        }
-
-        console.log(`🤖 Agent ${agent.name} triggered for ${remoteJid}`);
-
-        // 3. Context Builder
-        const { rows: history } = await db.query(`
-            SELECT from_me, content FROM messages 
-            WHERE remote_jid = $1 AND instance_name = $2 
-            ORDER BY created_at DESC LIMIT $3
-        `, [remoteJid, instanceName, agent.max_context]);
-
-        // Reverse to chronological order
-        const conversationHistory = history.reverse().map(m => ({
-            role: m.from_me ? 'assistant' : 'user',
-            content: m.content || ""
-        }));
-
-        // 4. Generate Response
-        let client = openai;
-        if (agent.api_key) {
-            client = new OpenAI({ apiKey: agent.api_key });
-        }
-
-        const completion = await client.chat.completions.create({
-            model: agent.model,
-            messages: [
-                { role: 'system', content: agent.prompt.replace('{name}', senderName || 'Cliente').replace('{now}', new Date().toLocaleString()) },
-                ...conversationHistory
-            ],
-            temperature: parseFloat(agent.temperature) || 0.7
-        });
-
-        const replyText = completion.choices[0].message.content;
-        if (!replyText) return;
-
-        // 5. Send Response via Evolution API
-        const { rows: hosts } = await db.query('SELECT base_url, api_key FROM evolution_hosts WHERE name = $1', [instanceName]);
-        if (hosts.length === 0) {
-            console.error("Host not found for auto-reply:", instanceName);
-            return;
-        }
-        const { base_url, api_key } = hosts[0];
-
-        // Delay slightly to feel natural
-        setTimeout(async () => {
-            await fetch(`${base_url}/message/sendText/${instanceName}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'apikey': api_key },
-                body: JSON.stringify({
-                    number: remoteJid.split('@')[0],
-                    text: replyText,
-                    // Optional: delay typing
-                })
-            });
-            console.log(`🤖 Agent replied to ${remoteJid}`);
-        }, 1500);
-
-    } catch (e) {
-        console.error("Agent Auto-Reply Error:", e);
-    }
-}
-
-
-// --- SERVE STATIC FRONTEND (Docker/Production) ---
-// --- SERVE STATIC FRONTEND ---
-const fs = require('fs');
-const distPath = path.join(__dirname, '../dist');
-const publicPath = path.join(__dirname, 'public');
-
-// Docker/Production (Dockerfile copies dist to server/public)
-if (fs.existsSync(path.join(publicPath, 'index.html'))) {
+if (fs.existsSync(path.join(publicPath, "index.html"))) {
     console.log(`Serving static files from ${publicPath}`);
     app.use(express.static(publicPath));
-    app.get('*', (req, res) => res.sendFile(path.join(publicPath, 'index.html')));
-}
-// Local Development (dist usually in root)
-else if (fs.existsSync(path.join(distPath, 'index.html'))) {
+    app.get("*", (req, res) => res.sendFile(path.join(publicPath, "index.html")));
+} else if (fs.existsSync(path.join(distPath, "index.html"))) {
     console.log(`Serving static files from ${distPath}`);
     app.use(express.static(distPath));
-    app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    app.get("*", (req, res) => res.sendFile(path.join(distPath, "index.html")));
 } else {
     console.warn("No static frontend found in 'public' or '../dist'.");
 }
 
-server.listen(port, () => {
-    console.log(`Server running with Socket.io on port ${port}`);
-});
+// -----------------------------
+// INICIO
+// -----------------------------
+(async () => {
+    try {
+        if (db.ready) await db.ready;
+    } catch (e) {
+        console.error("DB init failed:", e.message);
+        process.exit(1);
+    }
+
+    server.listen(port, () => {
+        console.log(`Server running with Socket.io on port ${port}`);
+        console.log(`Webhook: POST /webhook/:instanceName OR POST /webhook (with body.instance)`);
+    });
+})();

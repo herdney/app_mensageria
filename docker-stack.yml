@@ -5,15 +5,14 @@ services:
     image: herdneysantos/mensageria-app:latest
     environment:
       - PORT=3001
-      - DB_HOST=178.156.141.219
+      - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USER=postgres
       - DB_PASSWORD=458e19f01ac2eea293f56f356c9adfdf
       - DB_NAME=mensageria
       - OPENAI_API_KEY=sk-sua-chave-aqui
     networks:
-      - traefik-public # Rede externa onde o Traefik roda
-      - db-network     # Rede para comunicação com o banco (se estiver no swarm)
+      - cmh # Rede externa onde o Traefik roda
     deploy:
       mode: replicated
       replicas: 1

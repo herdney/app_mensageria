@@ -4,7 +4,7 @@ ferramentas_utilizadas.txt
 # Unnecessary/Dev files
 conexao.html
 server/webhook_debug.log
-server/migrate.js
+# server/migrate.js
 server/migrate_messages.js
 server/test_enrich_manual.js
 server/inspect_last.js
