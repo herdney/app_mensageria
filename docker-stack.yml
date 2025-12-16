@@ -6,13 +6,13 @@ services:
     environment:
       - PORT=3001
       - DB_HOST=postgres
-      - DB_PORT=5432
+      - DB_PORT=sua_porta_db
       - DB_USER=postgres
-      - DB_PASSWORD=458e19f01ac2eea293f56f356c9adfdf
+      - DB_PASSWORD=sua_senha_bd
       - DB_NAME=mensageria
       - OPENAI_API_KEY=sk-sua-chave-aqui
     networks:
-      - cmh # Rede externa onde o Traefik roda
+      - sua_rede_docker # Rede externa onde o Traefik roda
     deploy:
       mode: replicated
       replicas: 1
@@ -33,7 +33,5 @@ services:
         - "traefik.http.services.mensageria.loadbalancer.server.port=3001"
 
 networks:
-  traefik-public:
+  sua_rede_docker:
     external: true
-  db-network:
-    external: true # Assumindo que o banco também está no swarm, ou remova se for externo
