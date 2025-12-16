@@ -1,338 +1,284 @@
+// EvolutionApiService.ts
+
+export type InstanceInfoBase = {
+  instanceName: string;
+  instanceId: string;
+  status: string;
+};
+
+export type PairingInfo = {
+  base64?: string;
+  code?: string; // Raw pairing code
+  pairingCode?: string;
+};
+
 export interface CreateInstanceResponse {
-    instance: {
-        instanceName: string;
-        instanceId: string;
-        status: string;
-    };
-    hash: {
-        apikey: string;
-    };
-    qrcode?: {
-        base64: string;
-        code?: string; // Raw pairing code
-        pairingCode?: string;
-    } | string; // Sometimes returns just the base64 string directly
+  instance: InstanceInfoBase;
+  hash: { apikey: string };
+  qrcode?: PairingInfo | string; // às vezes vem string base64 direto
 }
 
 export interface ConnectInstanceResponse {
-    instance: {
-        instanceName: string;
-        instanceId: string;
-        status: string;
-        ownerJid?: string;
-        profilePicUrl?: string;
-    };
-    base64?: string;
-    code?: string; // Raw pairing code
+  instance: InstanceInfoBase & {
+    ownerJid?: string;
+    profilePicUrl?: string;
+  };
+  // Algumas versões retornam QR/pairing fora de "qrcode"
+  base64?: string;
+  code?: string;
 }
 
+const BASIC_WEBHOOK_EVENTS = ["MESSAGES_UPSERT", "SEND_MESSAGE"] as const;
+
+const FULL_WEBHOOK_EVENTS = [
+  "APPLICATION_STARTUP",
+  "MESSAGES_UPSERT",
+  "MESSAGES_UPDATE",
+  "MESSAGES_DELETE",
+  "SEND_MESSAGE_UPDATE",
+  "CONTACTS_UPSERT",
+  "CONTACTS_UPDATE",
+  "PRESENCE_UPDATE",
+  "CHATS_SET",
+  "CHATS_UPSERT",
+  "CHATS_UPDATE",
+  "CHATS_DELETE",
+  "GROUPS_UPSERT",
+  "GROUPS_UPDATE",
+  "GROUP_PARTICIPANTS_UPDATE",
+  "CONNECTION_UPDATE",
+  "SEND_MESSAGE",
+] as const;
+
+type Json = Record<string, any>;
+
 export class EvolutionApiService {
-    private baseUrl: string;
-    private globalApiKey: string | null;
+  private baseUrl: string;
+  private globalApiKey: string | null;
 
-    constructor(baseUrl: string, globalApiKey: string | null = null) {
-        this.baseUrl = baseUrl.replace(/\/$/, ""); // Remove trailing slash
-        this.globalApiKey = globalApiKey;
+  constructor(baseUrl: string, globalApiKey: string | null = null) {
+    this.baseUrl = baseUrl.replace(/\/$/, "");
+    this.globalApiKey = globalApiKey;
+  }
+
+  private getHeaders(apiKey?: string): HeadersInit {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+    const key = apiKey ?? this.globalApiKey;
+    if (key) headers["apikey"] = key;
+
+    return headers;
+  }
+
+  private async safeJson(response: Response): Promise<any> {
+    try {
+      return await response.json();
+    } catch {
+      // fallback para body texto (às vezes API responde text/plain)
+      const text = await response.text().catch(() => "");
+      return text ? { message: text } : {};
+    }
+  }
+
+  private async requestJson<T>(
+    url: string,
+    init: RequestInit & { apiKey?: string } = {},
+    opts: { allow404?: boolean; emptyOn404?: any } = {}
+  ): Promise<T> {
+    const response = await fetch(url, {
+      ...init,
+      headers: init.headers ?? this.getHeaders(init.apiKey),
+    });
+
+    if (!response.ok) {
+      if (opts.allow404 && response.status === 404) {
+        return opts.emptyOn404 as T;
+      }
+      const errorData = await this.safeJson(response);
+      throw new Error(errorData?.message || errorData?.error || `HTTP ${response.status}`);
     }
 
-    private getHeaders(apiKey?: string): HeadersInit {
-        const headers: HeadersInit = {
-            "Content-Type": "application/json",
-        };
+    return (await this.safeJson(response)) as T;
+  }
 
-        if (this.globalApiKey) {
-            headers["apikey"] = this.globalApiKey;
-        }
+  // ---------- Instances ----------
 
-        if (apiKey) {
-            headers["apikey"] = apiKey;
-        }
+  async createInstance(
+    instanceName: string,
+    token: string = "",
+    description: string = "",
+    webhookUrl: string = ""
+  ): Promise<CreateInstanceResponse> {
+    const body: Json = {
+      instanceName,
+      token,
+      description,
+      qrcode: true,
+      integration: "WHATSAPP-BAILEYS",
+    };
 
-        return headers;
+    if (webhookUrl) {
+      // Mantém o payload original do seu createInstance
+      body.webhook = {
+        url: webhookUrl,
+        byEvents: false,
+        base64: true,
+        events: [...BASIC_WEBHOOK_EVENTS],
+      };
     }
 
-    async createInstance(
-        instanceName: string,
-        token: string = "",
-        description: string = "",
-        webhookUrl: string = ""
-    ): Promise<CreateInstanceResponse> {
-        try {
-            const body: any = {
-                instanceName,
-                token,
-                description,
-                qrcode: true, // Auto-generate QR on create
-                integration: "WHATSAPP-BAILEYS",
-            };
+    return this.requestJson<CreateInstanceResponse>(`${this.baseUrl}/instance/create`, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(body),
+    });
+  }
 
-            if (webhookUrl) {
-                body.webhook = {
-                    url: webhookUrl,
-                    byEvents: false,
-                    base64: true,
-                    events: ["MESSAGES_UPSERT", "SEND_MESSAGE"]
-                };
-            }
+  async connectInstance(instanceName: string, apiKey?: string): Promise<ConnectInstanceResponse> {
+    return this.requestJson<ConnectInstanceResponse>(
+      `${this.baseUrl}/instance/connect/${encodeURIComponent(instanceName)}`,
+      { method: "GET", headers: this.getHeaders(apiKey) }
+    );
+  }
 
-            const response = await fetch(`${this.baseUrl}/instance/create`, {
-                method: "POST",
-                headers: this.getHeaders(),
-                body: JSON.stringify(body),
-            });
+  async fetchInstances(apiKey?: string): Promise<any[]> {
+    const data = await this.requestJson<any>(
+      `${this.baseUrl}/instance/fetchInstances`,
+      { method: "GET", headers: this.getHeaders(apiKey) }
+    );
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || "Failed to create instance");
-            }
+    return Array.isArray(data) ? data : [];
+  }
 
-            return await response.json();
-        } catch (error) {
-            console.error("Error creating instance:", error);
-            throw error;
-        }
+  async getConnectionState(instanceName: string, apiKey?: string): Promise<any | null> {
+    return this.requestJson<any | null>(
+      `${this.baseUrl}/instance/connectionState/${encodeURIComponent(instanceName)}`,
+      { method: "GET", headers: this.getHeaders(apiKey) },
+      { allow404: true, emptyOn404: null }
+    );
+  }
+
+  async logoutInstance(instanceName: string, apiKey?: string): Promise<any> {
+    return this.requestJson<any>(`${this.baseUrl}/instance/logout/${encodeURIComponent(instanceName)}`, {
+      method: "DELETE",
+      headers: this.getHeaders(apiKey),
+    });
+  }
+
+  async deleteInstance(instanceName: string, apiKey?: string): Promise<any> {
+    // Mantém regra: ignora 404
+    return this.requestJson<any>(
+      `${this.baseUrl}/instance/delete/${encodeURIComponent(instanceName)}`,
+      { method: "DELETE", headers: this.getHeaders(apiKey) },
+      { allow404: true, emptyOn404: {} }
+    ).catch((err) => {
+      // Se vier algum erro que não seja 404, propaga
+      throw err;
+    });
+  }
+
+  // ---------- Webhook ----------
+
+  async setWebhook(
+    instanceName: string,
+    webhookUrl: string,
+    params: {
+      enabled?: boolean;
+      events?: string[];
+      webhookByEvents?: boolean;
+      webhookBase64?: boolean;
+      apiKey?: string;
+    } = {}
+  ): Promise<any> {
+    const {
+      enabled = true,
+      events = [...FULL_WEBHOOK_EVENTS],
+      webhookByEvents = true,
+      webhookBase64 = true,
+      apiKey,
+    } = params;
+
+    // Mantém o payload original do seu setWebhook
+    const body = {
+      enabled,
+      url: webhookUrl,
+      webhookByEvents,
+      webhookBase64,
+      events,
+    };
+
+    return this.requestJson<any>(`${this.baseUrl}/webhook/set/${encodeURIComponent(instanceName)}`, {
+      method: "POST",
+      headers: this.getHeaders(apiKey),
+      body: JSON.stringify(body),
+    });
+  }
+
+  async findWebhook(instanceName: string, apiKey?: string): Promise<any | null> {
+    try {
+      return await this.requestJson<any | null>(
+        `${this.baseUrl}/webhook/find/${encodeURIComponent(instanceName)}`,
+        { method: "GET", headers: this.getHeaders(apiKey) },
+        { allow404: true, emptyOn404: null }
+      );
+    } catch {
+      return null; // mantém sua decisão de não quebrar a listagem
     }
+  }
 
-    async connectInstance(instanceName: string, apiKey?: string): Promise<ConnectInstanceResponse> {
-        try {
-            const response = await fetch(`${this.baseUrl}/instance/connect/${instanceName}`, {
-                method: "GET",
-                headers: this.getHeaders(apiKey),
-            });
+  // ---------- Messaging (proxy local) ----------
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || "Failed to connect instance");
-            }
+  async sendTextMessage(
+    instanceName: string,
+    number: string,
+    text: string,
+    delay: number = 1200
+  ): Promise<any> {
+    // Mantém: usa proxy local e sem apikey
+    return this.requestJson<any>(
+      `/message/sendText`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ instanceName, number, text, delay }),
+      }
+    );
+  }
 
-            return await response.json();
-        } catch (error) {
-            console.error("Error connecting instance:", error);
-            throw error;
-        }
+  // ---------- Chats / Messages ----------
+
+  async fetchChats(instanceName: string): Promise<any[]> {
+    try {
+      const data = await this.requestJson<any[]>(
+        `${this.baseUrl}/chat/findChats/${encodeURIComponent(instanceName)}`,
+        { method: "POST", headers: this.getHeaders() }
+      );
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
     }
+  }
 
-    async fetchInstances(apiKey?: string): Promise<any[]> {
-        try {
-            const response = await fetch(`${this.baseUrl}/instance/fetchInstances`, {
-                method: "GET",
-                headers: this.getHeaders(apiKey),
-            });
+  async fetchMessages(instanceName: string, remoteJid: string, limit: number = 50): Promise<any[]> {
+    try {
+      const data = await this.requestJson<any>(
+        `${this.baseUrl}/chat/findMessages/${encodeURIComponent(instanceName)}`,
+        {
+          method: "POST",
+          headers: this.getHeaders(),
+          body: JSON.stringify({
+            where: { key: { remoteJid } },
+            options: { limit, sort: { messageTimestamp: "desc" } },
+          }),
+        },
+        { allow404: true, emptyOn404: [] }
+      );
 
-            if (!response.ok) {
-                throw new Error("Failed to fetch instances");
-            }
-
-            const data = await response.json();
-            return Array.isArray(data) ? data : [];
-        } catch (error) {
-            console.error("Error fetching instances:", error);
-            throw error;
-        }
+      return Array.isArray(data) ? data : (data?.messages || data?.records || []);
+    } catch {
+      return [];
     }
-
-    async getConnectionState(instanceName: string, apiKey?: string): Promise<any> {
-        try {
-            const response = await fetch(`${this.baseUrl}/instance/connectionState/${instanceName}`, {
-                method: "GET",
-                headers: this.getHeaders(apiKey),
-            });
-
-            if (!response.ok) {
-                // validating 404 or other errors
-                if (response.status === 404) {
-                    return null; // Instance not found
-                }
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || "Failed to get connection state");
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error("Error getting connection state:", error);
-            throw error;
-        }
-    }
-    async logoutInstance(instanceName: string, apiKey?: string): Promise<any> {
-        try {
-            const response = await fetch(`${this.baseUrl}/instance/logout/${instanceName}`, {
-                method: "DELETE",
-                headers: this.getHeaders(apiKey),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || "Failed to logout instance");
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error("Error logging out instance:", error);
-            throw error;
-        }
-    }
-
-    async deleteInstance(instanceName: string, apiKey?: string): Promise<any> {
-        try {
-            const response = await fetch(`${this.baseUrl}/instance/delete/${instanceName}`, {
-                method: "DELETE",
-                headers: this.getHeaders(apiKey),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                // Ignore 404 on delete
-                if (response.status !== 404) {
-                    throw new Error(errorData.message || "Failed to delete instance");
-                }
-            }
-
-            return await response.json().catch(() => ({}));
-        } catch (error) {
-            console.error("Error deleting instance:", error);
-            throw error;
-        }
-    }
-    async setWebhook(instanceName: string, webhookUrl: string, enabled: boolean = true): Promise<any> {
-        try {
-            const response = await fetch(`${this.baseUrl}/webhook/set/${instanceName}`, {
-                method: "POST",
-                headers: this.getHeaders(),
-                body: JSON.stringify({
-                    enabled,
-                    url: webhookUrl,
-                    webhookByEvents: true,
-                    webhookBase64: true,
-                    events: [
-                        "APPLICATION_STARTUP",
-                        "MESSAGES_UPSERT",
-                        "MESSAGES_UPDATE",
-                        "MESSAGES_DELETE",
-                        "SEND_MESSAGE_UPDATE",
-                        "CONTACTS_UPSERT",
-                        "CONTACTS_UPDATE",
-                        "PRESENCE_UPDATE",
-                        "CHATS_SET",
-                        "CHATS_UPSERT",
-                        "CHATS_UPDATE",
-                        "CHATS_DELETE",
-                        "GROUPS_UPSERT",
-                        "GROUPS_UPDATE",
-                        "GROUP_PARTICIPANTS_UPDATE",
-                        "CONNECTION_UPDATE",
-                        "SEND_MESSAGE"
-                    ]
-                }),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || "Failed to set webhook");
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error("Error setting webhook:", error);
-            throw error;
-        }
-    }
-
-    async findWebhook(instanceName: string, apiKey?: string): Promise<any> {
-        try {
-            const response = await fetch(`${this.baseUrl}/webhook/find/${instanceName}`, {
-                method: "GET",
-                headers: this.getHeaders(apiKey),
-            });
-
-            if (!response.ok) {
-                if (response.status === 404) return null;
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.message || "Failed to find webhook");
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error("Error finding webhook:", error);
-            return null; // Return null on error to avoid breaking list fetch
-        }
-    }
-
-    async sendTextMessage(instanceName: string, number: string, text: string, delay: number = 1200): Promise<any> {
-        try {
-            // Use local proxy to ensure persistence and correct error handling
-            const body = {
-                instanceName, // Required for proxy lookup
-                number,
-                text,
-                delay
-            };
-
-            const response = await fetch(`/message/sendText`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" }, // No API key needed for local proxy
-                body: JSON.stringify(body),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(err => ({ rawError: err.message }));
-                throw new Error(errorData.error || errorData.message || JSON.stringify(errorData));
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error("Error sending message:", error);
-            throw error;
-        }
-    }
-    async fetchChats(instanceName: string): Promise<any[]> {
-        try {
-            const response = await fetch(`${this.baseUrl}/chat/findChats/${instanceName}`, {
-                method: "POST",
-                headers: this.getHeaders(),
-            });
-
-            if (!response.ok) {
-                throw new Error("Failed to fetch chats");
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error("Error fetching chats:", error);
-            return [];
-        }
-    }
-
-    async fetchMessages(instanceName: string, remoteJid: string, limit: number = 50): Promise<any[]> {
-        try {
-            const response = await fetch(`${this.baseUrl}/chat/findMessages/${instanceName}`, {
-                method: "POST",
-                headers: this.getHeaders(),
-                body: JSON.stringify({
-                    where: {
-                        key: {
-                            remoteJid
-                        }
-                    },
-                    options: {
-                        limit,
-                        sort: {
-                            messageTimestamp: "desc"
-                        }
-                    }
-                })
-            });
-
-            if (!response.ok) {
-                // If 404/others, return empty array to not break UI
-                return [];
-            }
-
-            const data = await response.json();
-            // Ensure we return an array. Evolution API might return { messages: [...] } or [...] or { records: [...] }
-            return Array.isArray(data) ? data : (data.messages || data.records || []);
-        } catch (error) {
-            console.error("Error fetching messages:", error);
-            return [];
-        }
-    }
+  }
 }

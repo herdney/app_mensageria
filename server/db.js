@@ -4,56 +4,122 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const { Pool, Client } = require("pg");
 
 const dbConfig = {
-    user: process.env.DB_USER || "postgres",
-    host: process.env.DB_HOST || "localhost",
-    database: process.env.DB_NAME || "mensageria",
-    password: process.env.DB_PASSWORD || "postgres",
-    port: Number(process.env.DB_PORT || 5432),
+  user: process.env.DB_USER || "postgres",
+  host: process.env.DB_HOST || "localhost",
+  database: process.env.DB_NAME || "mensageria",
+  password: process.env.DB_PASSWORD || "postgres",
+  port: Number(process.env.DB_PORT || 5432),
 };
 
-let pool;
-
-function escapeIdent(name) {
-    return `"${String(name).replace(/"/g, '""')}"`;
-}
+let pool = null;
 
 async function createDatabaseIfNotExists() {
-    const admin = new Client({
-        user: dbConfig.user,
-        host: dbConfig.host,
-        password: dbConfig.password,
-        port: dbConfig.port,
-        database: "postgres",
-    });
+  const admin = new Client({
+    user: dbConfig.user,
+    host: dbConfig.host,
+    password: dbConfig.password,
+    port: dbConfig.port,
+    database: "postgres",
+  });
 
-    try {
-        await admin.connect();
-        const exists = await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [dbConfig.database]);
-        if (exists.rowCount === 0) {
-            console.log(`Database '${dbConfig.database}' not found. Creating...`);
-            await admin.query(`CREATE DATABASE ${escapeIdent(dbConfig.database)}`);
-            console.log(`Database '${dbConfig.database}' created successfully.`);
-        } else {
-            console.log(`Database '${dbConfig.database}' already exists.`);
-        }
-    } finally {
-        await admin.end().catch(() => { });
+  try {
+    await admin.connect();
+
+    // evita SQL injection (parametrizado)
+    const check = await admin.query("SELECT 1 FROM pg_database WHERE datname = $1", [
+      dbConfig.database,
+    ]);
+
+    if (check.rowCount === 0) {
+      console.log(`Database '${dbConfig.database}' not found. Creating...`);
+
+      // CREATE DATABASE não aceita parâmetro; então usamos identifier seguro com aspas
+      await admin.query(`CREATE DATABASE "${dbConfig.database.replace(/"/g, '""')}"`);
+
+      console.log(`Database '${dbConfig.database}' created successfully.`);
+    } else {
+      console.log(`Database '${dbConfig.database}' already exists.`);
     }
+  } catch (err) {
+    console.error("Error creating database:", err);
+    throw err;
+  } finally {
+    await admin.end().catch(() => { });
+  }
+}
+
+function initPool() {
+  if (pool) return pool;
+
+  pool = new Pool(dbConfig);
+
+  pool.on("error", (err) => {
+    console.error("Unexpected error on idle client", err);
+    process.exit(-1);
+  });
+
+  return pool;
+}
+
+async function withPoolClient(fn) {
+  const p = initPool();
+  const client = await p.connect();
+  try {
+    return await fn(client);
+  } finally {
+    client.release();
+  }
+}
+
+async function ensureTable(client, sql) {
+  await client.query(sql);
+}
+
+async function ensureColumns(client, tableName, columnsSql) {
+  await client.query(`ALTER TABLE ${tableName} ${columnsSql}`);
+}
+
+async function ensureIndex(client, sql) {
+  await client.query(sql);
+}
+
+async function backfillContactsIfEmpty(client) {
+  const contactsCheck = await client.query("SELECT 1 FROM contacts LIMIT 1");
+  if (contactsCheck.rowCount > 0) return;
+
+  console.log("Backfilling contacts from messages table...");
+  await client.query(`
+    INSERT INTO contacts (
+      remote_jid,
+      instance_name,
+      push_name,
+      last_message_content,
+      last_message_from_me,
+      last_message_created_at
+    )
+    SELECT DISTINCT ON (remote_jid, instance_name)
+      remote_jid,
+      instance_name,
+      push_name,
+      content,
+      from_me,
+      created_at
+    FROM messages
+    ORDER BY remote_jid, instance_name, created_at DESC
+    ON CONFLICT DO NOTHING
+  `);
+  console.log("Contacts backfilled.");
 }
 
 async function initDb() {
-    await createDatabaseIfNotExists();
+  await createDatabaseIfNotExists();
+  initPool();
 
-    pool = new Pool(dbConfig);
-
-    pool.on("error", (err) => {
-        console.error("Unexpected error on idle client", err);
-        process.exit(-1);
-    });
-
-    const client = await pool.connect();
-    try {
-        await client.query(`
+  await withPoolClient(async (client) => {
+    // 1) evolution_hosts
+    await ensureTable(
+      client,
+      `
       CREATE TABLE IF NOT EXISTS evolution_hosts (
         id SERIAL PRIMARY KEY,
         name VARCHAR(255),
@@ -61,17 +127,24 @@ async function initDb() {
         api_key VARCHAR(255) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `
+    );
 
-        await client.query(`
-      ALTER TABLE evolution_hosts 
-      ADD COLUMN IF NOT EXISTS status VARCHAR(50), 
-      ADD COLUMN IF NOT EXISTS owner_jid VARCHAR(100), 
+    await ensureColumns(
+      client,
+      "evolution_hosts",
+      `
+      ADD COLUMN IF NOT EXISTS status VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS owner_jid VARCHAR(100),
       ADD COLUMN IF NOT EXISTS profile_pic_url TEXT,
-      ADD COLUMN IF NOT EXISTS webhook_url TEXT;
-    `);
+      ADD COLUMN IF NOT EXISTS webhook_url TEXT
+    `
+    );
 
-        await client.query(`
+    // 2) messages
+    await ensureTable(
+      client,
+      `
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         remote_jid TEXT NOT NULL,
@@ -82,13 +155,26 @@ async function initDb() {
         message_type TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `
+    );
 
-        await client.query(`CREATE INDEX IF NOT EXISTS idx_messages_jid ON messages(remote_jid, instance_name);`);
+    await ensureIndex(
+      client,
+      `CREATE INDEX IF NOT EXISTS idx_messages_jid ON messages(remote_jid, instance_name);`
+    );
 
-        await client.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS push_name TEXT;`);
+    await ensureColumns(
+      client,
+      "messages",
+      `
+      ADD COLUMN IF NOT EXISTS push_name TEXT
+    `
+    );
 
-        await client.query(`
+    // 3) contacts
+    await ensureTable(
+      client,
+      `
       CREATE TABLE IF NOT EXISTS contacts (
         remote_jid TEXT NOT NULL,
         instance_name TEXT NOT NULL,
@@ -102,9 +188,13 @@ async function initDb() {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (remote_jid, instance_name)
       );
-    `);
+    `
+    );
 
-        await client.query(`
+    // 4) agents
+    await ensureTable(
+      client,
+      `
       CREATE TABLE IF NOT EXISTS agents (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -120,38 +210,37 @@ async function initDb() {
         languages TEXT[],
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `
+    );
 
-        await client.query(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS api_key TEXT;`);
+    await ensureColumns(
+      client,
+      "agents",
+      `
+      ADD COLUMN IF NOT EXISTS api_key TEXT
+    `
+    );
 
-        const contactsCheck = await client.query("SELECT 1 FROM contacts LIMIT 1");
-        if (contactsCheck.rowCount === 0) {
-            console.log("Backfilling contacts from messages table...");
-            await client.query(`
-        INSERT INTO contacts (remote_jid, instance_name, push_name, last_message_content, last_message_from_me, last_message_created_at)
-        SELECT DISTINCT ON (remote_jid, instance_name)
-          remote_jid,
-          instance_name,
-          push_name,
-          content,
-          from_me,
-          created_at
-        FROM messages
-        ORDER BY remote_jid, instance_name, created_at DESC
-        ON CONFLICT DO NOTHING
-      `);
-            console.log("Contacts backfilled.");
-        }
+    await backfillContactsIfEmpty(client);
 
-        console.log("DB ready.");
-    } finally {
-        client.release();
-    }
+    console.log("Database tables verified: evolution_hosts, messages, contacts, agents.");
+  });
 }
 
-const ready = initDb();
+// inicializa ao importar (mantém seu comportamento)
+const ready = initDb().catch((err) => {
+  console.error("DB init failed:", err);
+  process.exit(1);
+});
 
 module.exports = {
-    ready,
-    query: (text, params) => ready.then(() => pool.query(text, params)),
+  ready,
+  query: (text, params) => {
+    if (!pool) return Promise.reject(new Error("Database not initialized yet"));
+    return pool.query(text, params);
+  },
+  getPool: () => {
+    if (!pool) throw new Error("Database not initialized yet");
+    return pool;
+  },
 };

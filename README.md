@@ -1,6 +1,6 @@
 # App Mensageria 🚀
 
-Uma plataforma centralizada para gestão de múltiplas instâncias do WhatsApp com capacidades avançadas de Agentes de IA. Construído sobre a [Evolution API v2](https://github.com/EvolutionAPI/evolution-api).
+Uma plataforma centralizada para gestão de múltiplas instâncias do WhatsApp com Agentes de IA. Construído sobre a [Evolution API v2](https://github.com/EvolutionAPI/evolution-api).
 
 ![Status](https://img.shields.io/badge/Status-Em_Desenvolvimento-yellow)
 ![Stack](https://img.shields.io/badge/Stack-React_Start_NodeJS_Postgres-blue)
@@ -11,15 +11,15 @@ Este projeto permite conectar e gerenciar múltiplas contas do WhatsApp em uma �
 
 ### ✨ Principais Funcionalidades
 
-*   **Multiatendimento & Multi-instância:** Gerencie várias conexões do WhatsApp simultaneamente.
+*   **Atendimento & Multi-instância:** Gerencie várias conexões do WhatsApp simultaneamente.
 *   **Chat em Tempo Real:** Interface reativa via Socket.io para envio e recebimento instantâneo de mensagens.
 *   **🤖 Agentes de IA:**
     *   Crie agentes com personalidades e funções específicas.
     *   Defina horários de funcionamento.
     *   Configure palavras-chave de ativação.
     *   Contexto de conversa inteligente (memória das últimas mensagens).
-*   **Gestão de Contatos:** Sincronização local de contatos e histórico de mensagens.
-*   **Interface Moderna:** Construída com React, TailwindCSS e Shadcn/ui para uma experiência premium.
+*   **Lista Contatos:** Sincronização local de contatos e histórico de mensagens.
+*   **Interface Moderna:** Construída com React, TailwindCSS e Shadcn/ui.
 
 ## 🛠️ Tecnologias Utilizadas
 
@@ -93,9 +93,9 @@ npm run dev
 ```
 Acesse `http://localhost:5173` no seu navegador.
 
-## 🐳 Deploy com Docker (Stack)
+## 🐳 Deploy com Docker Swarm (Stack)
 
-Para rodar o projeto em produção usando Docker Swarm ou Docker Compose, utilize a stack abaixo. Certifique-se de que o serviço do PostgreSQL esteja acessível na mesma rede ou ajuste a variável `DB_HOST`.
+Para rodar o projeto em produção usando Docker Swarm, utilize a stack abaixo. Certifique-se de que o serviço do PostgreSQL esteja acessível na mesma rede ou ajuste a variável `DB_HOST`.
 
 1. Crie um arquivo `docker-stack.yml`:
 
@@ -108,13 +108,13 @@ services:
     environment:
       - PORT=3001
       - DB_HOST=postgres # Nome do serviço do banco na rede
-      - DB_PORT=5432
+      - DB_PORT=porta_seu_banco
       - DB_USER=postgres
       - DB_PASSWORD=sua_senha_do_banco
       - DB_NAME=mensageria
       - OPENAI_API_KEY=sk-... # Sua chave da OpenAI
     networks:
-      - cmh # Rede onde o banco e o Traefik estão rodando
+      - sua_rede # Rede onde o banco e o Traefik estão rodando
     deploy:
       mode: replicated
       replicas: 1
@@ -128,7 +128,7 @@ services:
         - "traefik.http.services.mensageria.loadbalancer.server.port=3001"
 
 networks:
-  cmh:
+  sua_rede:
     external: true
 ```
 
